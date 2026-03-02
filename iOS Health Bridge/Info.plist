@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>PolyphasicDevs.iOS-Health-Bridge.HealthExport</string>
+	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>iOS Health Bridge exports your health data to your private iCloud folder so you can access it from other applications. Your data stays in your iCloud account and is never sent to external servers.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>iOS Health Bridge does not write health data. This permission is required by Apple for HealthKit access.</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.PolyphasicDevs.iOS-Health-Bridge</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>iOS Health Bridge</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+</dict>
+</plist>
