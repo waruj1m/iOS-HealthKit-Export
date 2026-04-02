@@ -9,7 +9,7 @@ import HealthKit
 @MainActor
 @Observable
 final class HealthDataManager {
-    private let healthStore = HKHealthStore()
+    let healthStore = HKHealthStore()
 
     var authorizationStatus: AuthorizationStatus = .notDetermined
     var lastExportDate: Date? = {

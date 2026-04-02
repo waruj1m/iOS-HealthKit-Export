@@ -20,61 +20,52 @@ struct HealthExportService {
         let endDate = Date()
         let startDate = calendar.date(byAdding: .day, value: -30, to: endDate) ?? endDate
 
-        var allExports: [String: Any] = [
+        // Run all HealthKit queries in parallel rather than sequentially.
+        // Sequential queries could take 30+ seconds and exhaust the old BGAppRefreshTask
+        // time limit, causing empty exports. With async let they all fire at once.
+        async let stepData        = queryQuantityType(.stepCount, unit: .count(), start: startDate, end: endDate)
+        async let distanceData    = queryQuantityType(.distanceWalkingRunning, unit: .meter(), start: startDate, end: endDate)
+        async let energyData      = queryQuantityType(.activeEnergyBurned, unit: .kilocalorie(), start: startDate, end: endDate)
+        async let heartRateData   = queryQuantityType(.heartRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate)
+        async let restingHRData   = queryQuantityType(.restingHeartRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate)
+        async let oxygenData      = queryQuantityType(.oxygenSaturation, unit: .percent(), start: startDate, end: endDate)
+        async let respiratoryData = queryQuantityType(.respiratoryRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate)
+        async let bodyMassData    = queryQuantityType(.bodyMass, unit: .gramUnit(with: .kilo), start: startDate, end: endDate)
+        async let heightData      = queryQuantityType(.height, unit: .meter(), start: startDate, end: endDate)
+        async let sleepData       = querySleepAnalysis(start: startDate, end: endDate)
+        async let mindfulData     = queryMindfulSessions(start: startDate, end: endDate)
+        async let workoutData     = queryWorkouts(start: startDate, end: endDate)
+
+        let (steps, distance, energy, heartRate, restingHR, oxygen, respiratory, bodyMass, height, sleep, mindful, workouts) =
+            await (stepData, distanceData, energyData, heartRateData, restingHRData, oxygenData, respiratoryData, bodyMassData, heightData, sleepData, mindfulData, workoutData)
+
+        var dataTypes: [String: Any] = [:]
+        if let v = steps        { dataTypes["stepCount"]              = v }
+        if let v = distance     { dataTypes["distanceWalkingRunning"] = v }
+        if let v = energy       { dataTypes["activeEnergyBurned"]     = v }
+        if let v = heartRate    { dataTypes["heartRate"]              = v }
+        if let v = restingHR    { dataTypes["restingHeartRate"]       = v }
+        if let v = oxygen       { dataTypes["oxygenSaturation"]       = v }
+        if let v = respiratory  { dataTypes["respiratoryRate"]        = v }
+        if let v = bodyMass     { dataTypes["bodyMass"]               = v }
+        if let v = height       { dataTypes["height"]                 = v }
+        if let v = sleep        { dataTypes["sleepAnalysis"]          = v }
+        if let v = mindful      { dataTypes["mindfulSessions"]        = v }
+        if let v = workouts     { dataTypes["workouts"]               = v }
+
+        let allExports: [String: Any] = [
             "exportDate": ISO8601DateFormatter().string(from: endDate),
             "exportVersion": "1.0",
             "dateRange": [
                 "start": ISO8601DateFormatter().string(from: startDate),
                 "end": ISO8601DateFormatter().string(from: endDate)
             ],
-            "dataTypes": [:]
+            "dataTypes": dataTypes
         ]
-
-        var dataTypes: [String: Any] = [:]
-
-        if let stepData = await queryQuantityType(.stepCount, unit: .count(), start: startDate, end: endDate) {
-            dataTypes["stepCount"] = stepData
-        }
-        if let distanceData = await queryQuantityType(.distanceWalkingRunning, unit: .meter(), start: startDate, end: endDate) {
-            dataTypes["distanceWalkingRunning"] = distanceData
-        }
-        if let energyData = await queryQuantityType(.activeEnergyBurned, unit: .kilocalorie(), start: startDate, end: endDate) {
-            dataTypes["activeEnergyBurned"] = energyData
-        }
-        if let heartRateData = await queryQuantityType(.heartRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate) {
-            dataTypes["heartRate"] = heartRateData
-        }
-        if let restingHRData = await queryQuantityType(.restingHeartRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate) {
-            dataTypes["restingHeartRate"] = restingHRData
-        }
-        if let oxygenData = await queryQuantityType(.oxygenSaturation, unit: .percent(), start: startDate, end: endDate) {
-            dataTypes["oxygenSaturation"] = oxygenData
-        }
-        if let respiratoryData = await queryQuantityType(.respiratoryRate, unit: HKUnit(from: "count/min"), start: startDate, end: endDate) {
-            dataTypes["respiratoryRate"] = respiratoryData
-        }
-        if let bodyMassData = await queryQuantityType(.bodyMass, unit: .gramUnit(with: .kilo), start: startDate, end: endDate) {
-            dataTypes["bodyMass"] = bodyMassData
-        }
-        if let heightData = await queryQuantityType(.height, unit: .meter(), start: startDate, end: endDate) {
-            dataTypes["height"] = heightData
-        }
-        if let sleepData = await querySleepAnalysis(start: startDate, end: endDate) {
-            dataTypes["sleepAnalysis"] = sleepData
-        }
-        if let mindfulData = await queryMindfulSessions(start: startDate, end: endDate) {
-            dataTypes["mindfulSessions"] = mindfulData
-        }
-        if let workoutData = await queryWorkouts(start: startDate, end: endDate) {
-            dataTypes["workouts"] = workoutData
-        }
-
-        allExports["dataTypes"] = dataTypes
 
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateString = dateFormatter.string(from: endDate)
-        let fileName = "health_export_\(dateString).json"
+        let fileName = "health_export_\(dateFormatter.string(from: endDate)).json"
         let data = try JSONSerialization.data(withJSONObject: allExports, options: [.prettyPrinted, .sortedKeys])
         return (data, fileName)
     }
@@ -249,7 +240,7 @@ struct HealthExportService {
                         "workoutActivityType": workout.workoutActivityType.rawValue,
                         "source": workout.sourceRevision.source.name
                     ]
-                    if let energy = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) {
+                    if let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie()) {
                         dict["totalEnergyBurned"] = energy
                     }
                     if let distance = workout.totalDistance?.doubleValue(for: .meter()) {
