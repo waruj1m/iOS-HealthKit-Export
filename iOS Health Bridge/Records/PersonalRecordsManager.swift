@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import OSLog
 
 @Observable final class PersonalRecordsManager {
     // MARK: - Properties
@@ -25,7 +26,7 @@ import HealthKit
                 let recordArray = try decoder.decode([PersonalRecord].self, from: recordsData)
                 records = Dictionary(uniqueKeysWithValues: recordArray.map { ($0.metricType, $0) })
             } catch {
-                print("Error loading records from disk: \(error)")
+                AppLogger.persistence.error("Error loading records from disk: \(String(describing: error), privacy: .public)")
                 records = [:]
             }
         } else {
@@ -39,7 +40,7 @@ import HealthKit
                 let goalsArray = try decoder.decode([HealthGoal].self, from: goalsData)
                 goals = Dictionary(uniqueKeysWithValues: goalsArray.map { ($0.id, $0) })
             } catch {
-                print("Error loading goals from disk: \(error)")
+                AppLogger.persistence.error("Error loading goals from disk: \(String(describing: error), privacy: .public)")
                 goals = [:]
             }
         } else {
@@ -55,7 +56,7 @@ import HealthKit
             let recordsData = try encoder.encode(recordsArray)
             UserDefaults.standard.set(recordsData, forKey: recordsKey)
         } catch {
-            print("Error saving records to disk: \(error)")
+            AppLogger.persistence.error("Error saving records to disk: \(String(describing: error), privacy: .public)")
         }
 
         // Save goals
@@ -65,7 +66,7 @@ import HealthKit
             let goalsData = try encoder.encode(goalsArray)
             UserDefaults.standard.set(goalsData, forKey: goalsKey)
         } catch {
-            print("Error saving goals to disk: \(error)")
+            AppLogger.persistence.error("Error saving goals to disk: \(String(describing: error), privacy: .public)")
         }
     }
 

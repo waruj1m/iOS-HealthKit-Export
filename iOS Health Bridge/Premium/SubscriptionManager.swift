@@ -1,4 +1,5 @@
 import StoreKit
+import OSLog
 
 @Observable
 final class SubscriptionManager {
@@ -73,7 +74,7 @@ final class SubscriptionManager {
         do {
             products = try await productLoader(productIDs)
         } catch {
-            print("Failed to load products: \(error)")
+            AppLogger.store.error("Failed to load products: \(String(describing: error), privacy: .public)")
             products = []
         }
     }
@@ -121,7 +122,7 @@ final class SubscriptionManager {
             await checkEntitlements()
             return tier == .premium
         } catch {
-            print("Restore failed: \(error)")
+            AppLogger.store.error("Restore failed: \(String(describing: error), privacy: .public)")
             return false
         }
     }
@@ -145,7 +146,7 @@ final class SubscriptionManager {
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified(_, let error):
-            print("Transaction verification failed: \(error)")
+            AppLogger.store.error("Transaction verification failed: \(String(describing: error), privacy: .public)")
             throw StoreError.failedVerification
         case .verified(let verified):
             return verified

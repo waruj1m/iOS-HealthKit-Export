@@ -32,8 +32,8 @@ struct SettingsView: View {
 
                     // Support
                     Section {
-                        linkRow(label: "Privacy Policy",   url: "https://polyphasicdevs.com/forma/privacy")
-                        linkRow(label: "Terms of Use",     url: "https://polyphasicdevs.com/forma/terms")
+                        linkRow(label: "Privacy Policy",   url: "https://polyphasicdevs.com/forma-privacy-policy/")
+                        linkRow(label: "Terms of Use",     url: "https://polyphasicdevs.com/forma-tos/")
                         linkRow(label: "Send Feedback",    url: "mailto:support@polyphasicdevs.com")
                     }
                     .listRowBackground(FormaColors.card)
@@ -50,7 +50,7 @@ struct SettingsView: View {
                     .listRowBackground(FormaColors.card)
 
                     // AI disclaimer
-                    Section(footer: aiDisclaimer) { }
+                    Section(footer: footerContent) { }
                         .listRowBackground(Color.clear)
                 }
                 .scrollContentBackground(.hidden)
@@ -139,11 +139,18 @@ struct SettingsView: View {
         }
     }
 
-    private var aiDisclaimer: some View {
-        Text("AI-generated insights are for informational purposes only and do not constitute medical advice. Always consult a qualified healthcare professional before making health or fitness decisions.")
-            .font(FormaType.caption())
-            .foregroundStyle(FormaColors.muted)
-            .multilineTextAlignment(.center)
+    private var footerContent: some View {
+        VStack(spacing: 12) {
+            Text("AI-generated insights are for informational purposes only and do not constitute medical advice. Always consult a qualified healthcare professional before making health or fitness decisions.")
+                .font(FormaType.caption())
+                .foregroundStyle(FormaColors.muted)
+                .multilineTextAlignment(.center)
+
+            Link("Built by Polyphasic Developers", destination: URL(string: "https://polyphasicdevs.com")!)
+                .font(FormaType.caption())
+                .foregroundStyle(FormaColors.teal)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
     }
 
     // MARK: Actions

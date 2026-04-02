@@ -293,6 +293,7 @@
 				DEVELOPMENT_TEAM = CLFD768655;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Forma;
 				INFOPLIST_FILE = "iOS Health Bridge/Info.plist";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "iOS Health Bridge reads your Apple Health data to power analytics and export it into a folder you choose. Your data stays on your device unless you explicitly save it somewhere else.";
@@ -330,6 +331,7 @@
 				DEVELOPMENT_TEAM = CLFD768655;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Forma;
 				INFOPLIST_FILE = "iOS Health Bridge/Info.plist";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "iOS Health Bridge reads your Apple Health data to power analytics and export it into a folder you choose. Your data stays on your device unless you explicitly save it somewhere else.";

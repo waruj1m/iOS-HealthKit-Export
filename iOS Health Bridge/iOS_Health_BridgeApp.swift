@@ -5,6 +5,7 @@
 
 import SwiftUI
 import BackgroundTasks
+import OSLog
 
 enum BackgroundExportScheduler {
     static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date? {
@@ -86,7 +87,7 @@ struct iOS_Health_BridgeApp: App {
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            print("Could not schedule health export: \(error)")
+            AppLogger.background.error("Could not schedule health export: \(String(describing: error), privacy: .public)")
         }
     }
 }

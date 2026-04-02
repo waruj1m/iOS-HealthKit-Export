@@ -72,8 +72,8 @@ struct iOS_Health_BridgeTests {
         #expect(archive.contains("xl/worksheets/sheet2.xml"))
         #expect(archive.contains("xl/worksheets/sheet3.xml"))
         #expect(archive.contains("All Data"))
-        #expect(archive.contains(truncatedSheetName))
-        #expect(archive.contains("electrocardiogramVoltageMeasurements1234567890") == false)
+        #expect(archive.contains("name=\"\(truncatedSheetName)\""))
+        #expect(archive.contains("name=\"electrocardiogramVoltageMeasurements1234567890\"") == false)
     }
 
     @MainActor
@@ -187,7 +187,11 @@ struct iOS_Health_BridgeTests {
 
         let trend = AnalyticsComputation.trend(from: dataPoints, metric: .restingHeartRate)
 
-        #expect(trend == .up)
+        if case .up = trend {
+            #expect(Bool(true))
+        } else {
+            Issue.record("Expected an improving trend for lower-is-better metrics.")
+        }
     }
 
     @Test func analyticsComputationDateIntervalUsesMonthlyBucketsForYearViews() {
