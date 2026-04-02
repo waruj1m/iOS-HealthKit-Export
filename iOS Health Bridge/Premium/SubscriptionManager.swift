@@ -5,11 +5,55 @@ final class SubscriptionManager {
     var tier: SubscriptionTier = .free
     var products: [Product] = []
 
+    private let productLoader: @Sendable ([String]) async throws -> [Product]
+    private let entitlementIDsProvider: @Sendable () -> AsyncStream<String>
+    private let transactionUpdateIDsProvider: @Sendable () -> AsyncStream<String>
+    private let syncHandler: @Sendable () async throws -> Void
     private var transactionListener: Task<Void, Never>?
 
-    init() {
-        transactionListener = Task {
-            await listenForTransactions()
+    init(
+        productLoader: (@Sendable ([String]) async throws -> [Product])? = nil,
+        entitlementIDsProvider: (@Sendable () -> AsyncStream<String>)? = nil,
+        transactionUpdateIDsProvider: (@Sendable () -> AsyncStream<String>)? = nil,
+        syncHandler: (@Sendable () async throws -> Void)? = nil,
+        startTransactionListener: Bool = true
+    ) {
+        self.productLoader = productLoader ?? { ids in
+            try await Product.products(for: ids)
+        }
+        self.entitlementIDsProvider = entitlementIDsProvider ?? {
+            AsyncStream { continuation in
+                let task = Task {
+                    for await result in Transaction.currentEntitlements {
+                        guard case .verified(let transaction) = result else { continue }
+                        continuation.yield(transaction.productID)
+                    }
+                    continuation.finish()
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
+        self.transactionUpdateIDsProvider = transactionUpdateIDsProvider ?? {
+            AsyncStream { continuation in
+                let task = Task {
+                    for await result in Transaction.updates {
+                        guard case .verified(let transaction) = result else { continue }
+                        continuation.yield(transaction.productID)
+                        await transaction.finish()
+                    }
+                    continuation.finish()
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
+        self.syncHandler = syncHandler ?? {
+            try await AppStore.sync()
+        }
+
+        if startTransactionListener {
+            transactionListener = Task {
+                await listenForTransactions()
+            }
         }
     }
 
@@ -27,7 +71,7 @@ final class SubscriptionManager {
     private func loadProducts() async {
         let productIDs = PremiumProductID.allCases.map { $0.rawValue }
         do {
-            products = try await Product.products(for: productIDs)
+            products = try await productLoader(productIDs)
         } catch {
             print("Failed to load products: \(error)")
             products = []
@@ -38,13 +82,8 @@ final class SubscriptionManager {
     private func checkEntitlements() async {
         var hasPremiumEntitlement = false
 
-        for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result else { continue }
-
-            let productID = transaction.productID
+        for await productID in entitlementIDsProvider() {
             if PremiumProductID.allCases.map({ $0.rawValue }).contains(productID) {
-                // Transaction.currentEntitlements already excludes expired
-                // subscriptions, so any verified transaction here is active.
                 hasPremiumEntitlement = true
                 if productID == PremiumProductID.lifetime.rawValue { break }
             }
@@ -78,7 +117,7 @@ final class SubscriptionManager {
     @MainActor
     func restorePurchases() async -> Bool {
         do {
-            try await AppStore.sync()
+            try await syncHandler()
             await checkEntitlements()
             return tier == .premium
         } catch {
@@ -114,10 +153,9 @@ final class SubscriptionManager {
     }
 
     private func listenForTransactions() async {
-        for await result in Transaction.updates {
-            if case .verified(let transaction) = result {
+        for await productID in transactionUpdateIDsProvider() {
+            if PremiumProductID.allCases.map({ $0.rawValue }).contains(productID) {
                 await checkEntitlements()
-                await transaction.finish()
             }
         }
     }

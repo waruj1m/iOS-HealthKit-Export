@@ -2,6 +2,48 @@ import Foundation
 import HealthKit
 import Observation
 
+enum AnalyticsComputation {
+    static func average(for dataPoints: [AggregatedDataPoint]) -> Double {
+        guard !dataPoints.isEmpty else { return 0 }
+        let sum = dataPoints.map { $0.value }.reduce(0, +)
+        return sum / Double(dataPoints.count)
+    }
+
+    static func trend(
+        from dataPoints: [AggregatedDataPoint],
+        metric: HealthMetricType
+    ) -> MetricSummary.TrendDirection {
+        guard dataPoints.count >= 3 else {
+            return .insufficient
+        }
+
+        let lastThree = Array(dataPoints.suffix(3))
+        let isIncreasing = lastThree[0].value <= lastThree[1].value && lastThree[1].value <= lastThree[2].value
+        let isDecreasing = lastThree[0].value >= lastThree[1].value && lastThree[1].value >= lastThree[2].value
+
+        if isIncreasing {
+            return metric.higherIsBetter ? .up : .down
+        } else if isDecreasing {
+            return metric.higherIsBetter ? .down : .up
+        }
+
+        return .flat
+    }
+
+    static func dateInterval(for component: Calendar.Component) -> DateComponents {
+        switch component {
+        case .hour:
+            return DateComponents(hour: 1)
+        case .day:
+            return DateComponents(day: 1)
+        case .month:
+            return DateComponents(day: 1)
+        default:
+            return DateComponents(month: 1)
+        }
+    }
+}
+
 @Observable final class AnalyticsDataService {
     private let healthStore: HKHealthStore
 
@@ -26,7 +68,7 @@ import Observation
             return nil
         }
 
-        let average = calculateAverage(dataPoints)
+        let average = AnalyticsComputation.average(for: dataPoints)
         let minimum = dataPoints.map { $0.value }.min() ?? 0
         let maximum = dataPoints.map { $0.value }.max() ?? 0
         let total = metric.aggregationMethod == .sum
@@ -44,12 +86,12 @@ import Observation
             bucketComponent: period.bucketComponent
         )
 
-        let priorAverage = calculateAverage(priorDataPoints)
+        let priorAverage = AnalyticsComputation.average(for: priorDataPoints)
         let percentChange = priorAverage > 0
             ? ((average - priorAverage) / priorAverage) * 100
             : nil
 
-        let trend = determineTrend(from: dataPoints, metric: metric)
+        let trend = AnalyticsComputation.trend(from: dataPoints, metric: metric)
 
         return MetricSummary(
             metricType: metric,
@@ -129,7 +171,7 @@ import Observation
         metric: HealthMetricType
     ) async -> [AggregatedDataPoint] {
         return await withCheckedContinuation { continuation in
-            let interval = dateInterval(for: bucketComponent)
+            let interval = AnalyticsComputation.dateInterval(for: bucketComponent)
             let anchorDate = Calendar.current.startOfDay(for: endDate)
 
             let options: HKStatisticsOptions = aggregationMethod == .sum
@@ -308,42 +350,5 @@ import Observation
         }
 
         return HKObjectType.quantityType(forIdentifier: typeIdentifier)
-    }
-
-    private func calculateAverage(_ dataPoints: [AggregatedDataPoint]) -> Double {
-        guard !dataPoints.isEmpty else { return 0 }
-        let sum = dataPoints.map { $0.value }.reduce(0, +)
-        return sum / Double(dataPoints.count)
-    }
-
-    private func determineTrend(from dataPoints: [AggregatedDataPoint], metric: HealthMetricType) -> MetricSummary.TrendDirection {
-        guard dataPoints.count >= 3 else {
-            return .insufficient
-        }
-
-        let lastThree = Array(dataPoints.suffix(3))
-        let isIncreasing = lastThree[0].value <= lastThree[1].value && lastThree[1].value <= lastThree[2].value
-        let isDecreasing = lastThree[0].value >= lastThree[1].value && lastThree[1].value >= lastThree[2].value
-
-        if isIncreasing {
-            return metric.higherIsBetter ? .up : .down
-        } else if isDecreasing {
-            return metric.higherIsBetter ? .down : .up
-        }
-
-        return .flat
-    }
-
-    private func dateInterval(for component: Calendar.Component) -> DateComponents {
-        switch component {
-        case .hour:
-            return DateComponents(hour: 1)
-        case .day:
-            return DateComponents(day: 1)
-        case .month:
-            return DateComponents(day: 1)
-        default:
-            return DateComponents(month: 1)
-        }
     }
 }

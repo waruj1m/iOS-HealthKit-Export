@@ -6,6 +6,17 @@
 import SwiftUI
 import BackgroundTasks
 
+enum BackgroundExportScheduler {
+    static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date? {
+        var components = calendar.dateComponents([.year, .month, .day], from: date)
+        components.day = (components.day ?? 0) + 1
+        components.hour = 0
+        components.minute = 0
+        components.second = 0
+        return calendar.date(from: components)
+    }
+}
+
 @main
 struct iOS_Health_BridgeApp: App {
 
@@ -68,12 +79,7 @@ struct iOS_Health_BridgeApp: App {
         let request = BGProcessingTaskRequest(
             identifier: "PolyphasicDevs.iOS-Health-Bridge.HealthExport"
         )
-        let calendar  = Calendar.current
-        var components = calendar.dateComponents([.year, .month, .day], from: Date())
-        components.day!  += 1
-        components.hour   = 0
-        components.minute = 0
-        request.earliestBeginDate      = calendar.date(from: components)
+        request.earliestBeginDate = BackgroundExportScheduler.nextMidnight(after: Date())
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower       = false
 

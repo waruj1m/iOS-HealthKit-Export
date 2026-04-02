@@ -6,26 +6,50 @@
 import Foundation
 import HealthKit
 
+protocol HealthDataStoring: AnyObject {
+    func double(forKey defaultName: String) -> Double
+    func set(_ value: Double, forKey defaultName: String)
+    func string(forKey defaultName: String) -> String?
+    func set(_ value: String?, forKey defaultName: String)
+    func bool(forKey defaultName: String) -> Bool
+    func set(_ value: Bool, forKey defaultName: String)
+    func data(forKey defaultName: String) -> Data?
+    func set(_ value: Data?, forKey defaultName: String)
+}
+
+extension UserDefaults: HealthDataStoring {
+    func set(_ value: String?, forKey defaultName: String) {
+        set(value as Any?, forKey: defaultName)
+    }
+
+    func set(_ value: Data?, forKey defaultName: String) {
+        set(value as Any?, forKey: defaultName)
+    }
+}
+
 @MainActor
 @Observable
 final class HealthDataManager {
     let healthStore = HKHealthStore()
+    private let storage: HealthDataStoring
+    private let isHealthDataAvailableProvider: () -> Bool
+    private let authorizationStatusProvider: @MainActor @Sendable ([HKObjectType]) async throws -> HKAuthorizationRequestStatus
+    private let requestAuthorizationHandler: @MainActor @Sendable ([HKObjectType]) async throws -> Void
+    private let exportHandler: @MainActor @Sendable (URL, ExportFormat) async throws -> Void
 
     var authorizationStatus: AuthorizationStatus = .notDetermined
-    var lastExportDate: Date? = {
-        let raw = UserDefaults.standard.double(forKey: "lastExportDate")
-        return raw > 0 ? Date(timeIntervalSince1970: raw) : nil
-    }() {
+    var lastExportDate: Date? {
         didSet {
-            UserDefaults.standard.set(lastExportDate?.timeIntervalSince1970 ?? 0, forKey: "lastExportDate")
+            storage.set(lastExportDate?.timeIntervalSince1970 ?? 0, forKey: Self.lastExportDateKey)
         }
     }
     var exportError: String?
     var exportFolderDisplayName: String? {
-        get { UserDefaults.standard.string(forKey: Self.exportFolderNameKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.exportFolderNameKey) }
+        get { storage.string(forKey: Self.exportFolderNameKey) }
+        set { storage.set(newValue, forKey: Self.exportFolderNameKey) }
     }
 
+    private static let lastExportDateKey = "lastExportDate"
     private static let exportFolderBookmarkKey = "exportFolderBookmark"
     private static let exportFolderNameKey = "exportFolderDisplayName"
 
@@ -41,10 +65,34 @@ final class HealthDataManager {
     }
 
     var isHealthDataAvailable: Bool {
-        HKHealthStore.isHealthDataAvailable()
+        isHealthDataAvailableProvider()
     }
 
     private static let hasCompletedAuthorizationKey = "hasCompletedHealthAuthorization"
+
+    init(
+        storage: HealthDataStoring = UserDefaults.standard,
+        isHealthDataAvailableProvider: @escaping () -> Bool = HKHealthStore.isHealthDataAvailable,
+        authorizationStatusProvider: (@MainActor @Sendable ([HKObjectType]) async throws -> HKAuthorizationRequestStatus)? = nil,
+        requestAuthorizationHandler: (@MainActor @Sendable ([HKObjectType]) async throws -> Void)? = nil,
+        exportHandler: (@MainActor @Sendable (URL, ExportFormat) async throws -> Void)? = nil
+    ) {
+        self.storage = storage
+        self.isHealthDataAvailableProvider = isHealthDataAvailableProvider
+        self.authorizationStatusProvider = authorizationStatusProvider ?? { [healthStore] readTypes in
+            try await healthStore.statusForAuthorizationRequest(toShare: [], read: Set(readTypes))
+        }
+        self.requestAuthorizationHandler = requestAuthorizationHandler ?? { [healthStore] readTypes in
+            try await healthStore.requestAuthorization(toShare: [], read: Set(readTypes))
+        }
+        self.exportHandler = exportHandler ?? { [healthStore] folderURL, format in
+            let service = HealthExportService(healthStore: healthStore)
+            try await service.exportToFolder(folderURL, format: format)
+        }
+
+        let raw = storage.double(forKey: Self.lastExportDateKey)
+        self.lastExportDate = raw > 0 ? Date(timeIntervalSince1970: raw) : nil
+    }
 
     func checkAuthorizationStatus() async {
         guard isHealthDataAvailable else {
@@ -53,16 +101,13 @@ final class HealthDataManager {
         }
 
         do {
-            let requestStatus = try await healthStore.statusForAuthorizationRequest(
-                toShare: [],
-                read: Set(Self.readTypes)
-            )
+            let requestStatus = try await authorizationStatusProvider(Self.readTypes)
 
             switch requestStatus {
             case .unnecessary:
                 authorizationStatus = .authorized
             case .shouldRequest:
-                authorizationStatus = UserDefaults.standard.bool(forKey: Self.hasCompletedAuthorizationKey)
+                authorizationStatus = storage.bool(forKey: Self.hasCompletedAuthorizationKey)
                     ? .denied
                     : .notDetermined
             case .unknown:
@@ -71,7 +116,7 @@ final class HealthDataManager {
                 authorizationStatus = .notDetermined
             }
         } catch {
-            authorizationStatus = UserDefaults.standard.bool(forKey: Self.hasCompletedAuthorizationKey)
+            authorizationStatus = storage.bool(forKey: Self.hasCompletedAuthorizationKey)
                 ? .denied
                 : .notDetermined
         }
@@ -84,24 +129,24 @@ final class HealthDataManager {
         }
 
         let typesToRead = Self.readTypes
-        try await healthStore.requestAuthorization(toShare: [], read: Set(typesToRead))
+        try await requestAuthorizationHandler(typesToRead)
 
-        UserDefaults.standard.set(true, forKey: Self.hasCompletedAuthorizationKey)
+        storage.set(true, forKey: Self.hasCompletedAuthorizationKey)
         await checkAuthorizationStatus()
     }
 
     var hasExportFolder: Bool {
-        UserDefaults.standard.data(forKey: Self.exportFolderBookmarkKey) != nil
+        storage.data(forKey: Self.exportFolderBookmarkKey) != nil
     }
 
     func setExportFolder(bookmarkData: Data, displayName: String?) {
-        UserDefaults.standard.set(bookmarkData, forKey: Self.exportFolderBookmarkKey)
+        storage.set(bookmarkData, forKey: Self.exportFolderBookmarkKey)
         exportFolderDisplayName = displayName ?? "Folder"
     }
 
     func performExport(format: ExportFormat = .json) async {
         guard isAuthorized else { return }
-        guard let bookmarkData = UserDefaults.standard.data(forKey: Self.exportFolderBookmarkKey) else {
+        guard let bookmarkData = storage.data(forKey: Self.exportFolderBookmarkKey) else {
             exportError = "Set export folder first"
             return
         }
@@ -115,9 +160,8 @@ final class HealthDataManager {
             didStartAccess = true
         }
         defer { if didStartAccess { folderURL.stopAccessingSecurityScopedResource() } }
-        let service = HealthExportService(healthStore: healthStore)
         do {
-            try await service.exportToFolder(folderURL, format: format)
+            try await exportHandler(folderURL, format)
             lastExportDate = Date()
             exportError = nil
         } catch {

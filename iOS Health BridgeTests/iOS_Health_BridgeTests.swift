@@ -1,8 +1,157 @@
 import Foundation
+import HealthKit
 import Testing
 @testable import iOS_Health_Bridge
 
 struct iOS_Health_BridgeTests {
+    @MainActor
+    @Test func healthDataManagerMarksAuthorizedWhenAuthorizationIsUnnecessary() async {
+        let manager = HealthDataManager(
+            storage: InMemoryHealthDataStore(),
+            isHealthDataAvailableProvider: { true },
+            authorizationStatusProvider: { _ in .unnecessary }
+        )
+
+        await manager.checkAuthorizationStatus()
+
+        #expect(manager.authorizationStatus == .authorized)
+    }
+
+    @MainActor
+    @Test func healthDataManagerTreatsRequestedButMissingAccessAsDenied() async {
+        let storage = InMemoryHealthDataStore()
+        storage.set(true, forKey: "hasCompletedHealthAuthorization")
+        let manager = HealthDataManager(
+            storage: storage,
+            isHealthDataAvailableProvider: { true },
+            authorizationStatusProvider: { _ in .shouldRequest }
+        )
+
+        await manager.checkAuthorizationStatus()
+
+        #expect(manager.authorizationStatus == .denied)
+    }
+
+    @MainActor
+    @Test func healthDataManagerExportSuccessUpdatesTimestampAndClearsError() async throws {
+        let storage = InMemoryHealthDataStore()
+        let folderURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        let bookmark = try folderURL.bookmarkData()
+        storage.set(bookmark, forKey: "exportFolderBookmark")
+
+        var exportedURL: URL?
+        var exportedFormat: ExportFormat?
+
+        let manager = HealthDataManager(
+            storage: storage,
+            isHealthDataAvailableProvider: { true },
+            authorizationStatusProvider: { _ in .unnecessary },
+            exportHandler: { url, format in
+                exportedURL = url
+                exportedFormat = format
+            }
+        )
+
+        await manager.checkAuthorizationStatus()
+        await manager.performExport(format: .csv)
+
+        #expect(exportedURL == folderURL)
+        #expect(exportedFormat == .csv)
+        #expect(manager.exportError == nil)
+        #expect(manager.lastExportDate != nil)
+    }
+
+    @MainActor
+    @Test func subscriptionManagerLoadsPremiumTierFromEntitlements() async {
+        let manager = SubscriptionManager(
+            productLoader: { _ in [] },
+            entitlementIDsProvider: {
+                AsyncStream { continuation in
+                    continuation.yield(PremiumProductID.annual.rawValue)
+                    continuation.finish()
+                }
+            },
+            startTransactionListener: false
+        )
+
+        await manager.loadSubscriptionStatus()
+
+        #expect(manager.tier == .premium)
+    }
+
+    @MainActor
+    @Test func subscriptionManagerRestoreReturnsFalseWhenSyncFails() async {
+        let manager = SubscriptionManager(
+            productLoader: { _ in [] },
+            entitlementIDsProvider: {
+                AsyncStream { continuation in
+                    continuation.finish()
+                }
+            },
+            syncHandler: {
+                struct SyncFailure: Error {}
+                throw SyncFailure()
+            },
+            startTransactionListener: false
+        )
+
+        let restored = await manager.restorePurchases()
+
+        #expect(restored == false)
+        #expect(manager.tier == .free)
+    }
+
+    @Test func analyticsComputationAverageReturnsMean() {
+        let dataPoints = makeDataPoints([2, 4, 6])
+
+        let average = AnalyticsComputation.average(for: dataPoints)
+
+        #expect(average == 4)
+    }
+
+    @Test func analyticsComputationTrendHandlesLowerIsBetterMetrics() {
+        let dataPoints = makeDataPoints([70, 68, 65])
+
+        let trend = AnalyticsComputation.trend(from: dataPoints, metric: .restingHeartRate)
+
+        #expect(trend == .up)
+    }
+
+    @Test func analyticsComputationDateIntervalUsesMonthlyBucketsForYearViews() {
+        let interval = AnalyticsComputation.dateInterval(for: .year)
+
+        #expect(interval.month == 1)
+        #expect(interval.day == nil)
+    }
+
+    @Test func backgroundExportSchedulerSchedulesNextMidnight() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        let current = calendar.date(from: DateComponents(
+            timeZone: .gmt,
+            year: 2026,
+            month: 4,
+            day: 2,
+            hour: 14,
+            minute: 37,
+            second: 20
+        ))!
+
+        let nextRun = BackgroundExportScheduler.nextMidnight(after: current, calendar: calendar)
+        let expected = calendar.date(from: DateComponents(
+            timeZone: .gmt,
+            year: 2026,
+            month: 4,
+            day: 3,
+            hour: 0,
+            minute: 0,
+            second: 0
+        ))
+
+        #expect(nextRun == expected)
+    }
+
     @Test func timePeriodDayStartsAtBeginningOfDay() {
         let calendar = Calendar(identifier: .gregorian)
         let midday = calendar.date(from: DateComponents(
@@ -153,5 +302,55 @@ struct iOS_Health_BridgeTests {
             percentChange: nil,
             trend: .flat
         )
+    }
+
+    private func makeDataPoints(_ values: [Double]) -> [AggregatedDataPoint] {
+        values.enumerated().map { index, value in
+            AggregatedDataPoint(
+                date: Calendar(identifier: .gregorian).date(from: DateComponents(
+                    timeZone: .gmt,
+                    year: 2026,
+                    month: 4,
+                    day: index + 1
+                ))!,
+                value: value
+            )
+        }
+    }
+}
+
+private final class InMemoryHealthDataStore: HealthDataStoring {
+    private var values: [String: Any] = [:]
+
+    func double(forKey defaultName: String) -> Double {
+        values[defaultName] as? Double ?? 0
+    }
+
+    func set(_ value: Double, forKey defaultName: String) {
+        values[defaultName] = value
+    }
+
+    func string(forKey defaultName: String) -> String? {
+        values[defaultName] as? String
+    }
+
+    func set(_ value: String?, forKey defaultName: String) {
+        values[defaultName] = value
+    }
+
+    func bool(forKey defaultName: String) -> Bool {
+        values[defaultName] as? Bool ?? false
+    }
+
+    func set(_ value: Bool, forKey defaultName: String) {
+        values[defaultName] = value
+    }
+
+    func data(forKey defaultName: String) -> Data? {
+        values[defaultName] as? Data
+    }
+
+    func set(_ value: Data?, forKey defaultName: String) {
+        values[defaultName] = value
     }
 }
