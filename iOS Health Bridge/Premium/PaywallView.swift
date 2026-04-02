@@ -223,7 +223,7 @@ struct PaywallView: View {
                     ProgressView()
                         .tint(Color(hex: "0D0F14"))
                 } else {
-                    Text("Start Free Trial")
+                    Text(purchaseButtonTitle)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -258,6 +258,15 @@ struct PaywallView: View {
             .font(.system(size: 11, weight: .regular))
             .foregroundColor(Color(hex: "717179"))
             .multilineTextAlignment(.center)
+    }
+
+    private var purchaseButtonTitle: String {
+        switch selectedPlan {
+        case .lifetime:
+            return "Unlock Lifetime"
+        case .monthly, .annual:
+            return "Continue"
+        }
     }
 
     private func purchaseSelectedPlan() {

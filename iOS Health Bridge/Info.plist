@@ -6,23 +6,9 @@
 	<array>
 		<string>PolyphasicDevs.iOS-Health-Bridge.HealthExport</string>
 	</array>
-	<key>NSUbiquitousContainers</key>
-	<dict>
-		<key>iCloud.PolyphasicDevs.iOS-Health-Bridge</key>
-		<dict>
-			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
-			<true/>
-			<key>NSUbiquitousContainerName</key>
-			<string>iOS Health Bridge</string>
-			<key>NSUbiquitousContainerSupportedFolderLevels</key>
-			<string>Any</string>
-		</dict>
-	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>fetch</string>
 		<string>processing</string>
-		<string>remote-notification</string>
 	</array>
 </dict>
 </plist>

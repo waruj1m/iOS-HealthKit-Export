@@ -110,6 +110,8 @@ import Observation
             return await fetchStatisticsData(
                 quantityType: quantityType,
                 predicate: predicate,
+                startDate: startDate,
+                endDate: endDate,
                 bucketComponent: bucketComponent,
                 aggregationMethod: metric.aggregationMethod,
                 metric: metric
@@ -120,12 +122,15 @@ import Observation
     private func fetchStatisticsData(
         quantityType: HKQuantityType,
         predicate: NSPredicate,
+        startDate: Date,
+        endDate: Date,
         bucketComponent: Calendar.Component,
         aggregationMethod: HealthMetricType.AggregationMethod,
         metric: HealthMetricType
     ) async -> [AggregatedDataPoint] {
         return await withCheckedContinuation { continuation in
             let interval = dateInterval(for: bucketComponent)
+            let anchorDate = Calendar.current.startOfDay(for: endDate)
 
             let options: HKStatisticsOptions = aggregationMethod == .sum
                 ? .cumulativeSum
@@ -135,18 +140,18 @@ import Observation
                 quantityType: quantityType,
                 quantitySamplePredicate: predicate,
                 options: options,
-                anchorDate: Date(),
+                anchorDate: anchorDate,
                 intervalComponents: interval
             )
 
-            query.initialResultsHandler = { query, results, error in
+            query.initialResultsHandler = { _, results, _ in
                 guard let results = results else {
                     continuation.resume(returning: [])
                     return
                 }
 
                 var dataPoints: [AggregatedDataPoint] = []
-                results.enumerateStatistics(from: Date().addingTimeInterval(-30 * 24 * 3600), to: Date()) { stats, _ in
+                results.enumerateStatistics(from: startDate, to: endDate) { stats, _ in
                     guard let sum = stats.sumQuantity() ?? stats.averageQuantity() else {
                         return
                     }

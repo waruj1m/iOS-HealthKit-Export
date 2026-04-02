@@ -11,9 +11,10 @@ import SwiftUI
 
 struct ExportView: View {
     @Bindable var healthManager : HealthDataManager
-    @State private var isExporting    = false
+    @State private var isExporting      = false
     @State private var showFolderPicker = false
-    @State private var showSuccess    = false
+    @State private var showSuccess      = false
+    @State private var exportFormat: ExportFormat = .json
 
     var body: some View {
         NavigationStack {
@@ -27,6 +28,9 @@ struct ExportView: View {
 
                         // Folder card
                         folderCard
+
+                        // Format picker card
+                        formatCard
 
                         // Last export card
                         lastExportCard
@@ -114,6 +118,21 @@ struct ExportView: View {
                             .clipShape(Capsule())
                     }
                 }
+            }
+        }
+    }
+
+    private var formatCard: some View {
+        FormaCard {
+            VStack(alignment: .leading, spacing: 12) {
+                FormaSectionHeader(title: "Export Format")
+
+                Picker("Format", selection: $exportFormat) {
+                    ForEach(ExportFormat.allCases) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
     }
@@ -220,7 +239,7 @@ struct ExportView: View {
         guard !isExporting else { return }
         isExporting = true
         Task {
-            await healthManager.performExport()
+            await healthManager.performExport(format: exportFormat)
             isExporting = false
             if healthManager.exportError == nil {
                 withAnimation { showSuccess = true }

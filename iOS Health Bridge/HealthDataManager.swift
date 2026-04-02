@@ -52,12 +52,29 @@ final class HealthDataManager {
             return
         }
 
-        if UserDefaults.standard.bool(forKey: Self.hasCompletedAuthorizationKey) {
-            authorizationStatus = .authorized
-            return
-        }
+        do {
+            let requestStatus = try await healthStore.statusForAuthorizationRequest(
+                toShare: [],
+                read: Set(Self.readTypes)
+            )
 
-        authorizationStatus = .notDetermined
+            switch requestStatus {
+            case .unnecessary:
+                authorizationStatus = .authorized
+            case .shouldRequest:
+                authorizationStatus = UserDefaults.standard.bool(forKey: Self.hasCompletedAuthorizationKey)
+                    ? .denied
+                    : .notDetermined
+            case .unknown:
+                authorizationStatus = .notDetermined
+            @unknown default:
+                authorizationStatus = .notDetermined
+            }
+        } catch {
+            authorizationStatus = UserDefaults.standard.bool(forKey: Self.hasCompletedAuthorizationKey)
+                ? .denied
+                : .notDetermined
+        }
     }
 
     func requestAuthorization() async throws {
@@ -70,7 +87,7 @@ final class HealthDataManager {
         try await healthStore.requestAuthorization(toShare: [], read: Set(typesToRead))
 
         UserDefaults.standard.set(true, forKey: Self.hasCompletedAuthorizationKey)
-        authorizationStatus = .authorized
+        await checkAuthorizationStatus()
     }
 
     var hasExportFolder: Bool {
@@ -82,7 +99,7 @@ final class HealthDataManager {
         exportFolderDisplayName = displayName ?? "Folder"
     }
 
-    func performExport() async {
+    func performExport(format: ExportFormat = .json) async {
         guard isAuthorized else { return }
         guard let bookmarkData = UserDefaults.standard.data(forKey: Self.exportFolderBookmarkKey) else {
             exportError = "Set export folder first"
@@ -100,7 +117,7 @@ final class HealthDataManager {
         defer { if didStartAccess { folderURL.stopAccessingSecurityScopedResource() } }
         let service = HealthExportService(healthStore: healthStore)
         do {
-            try await service.exportToFolder(folderURL)
+            try await service.exportToFolder(folderURL, format: format)
             lastExportDate = Date()
             exportError = nil
         } catch {

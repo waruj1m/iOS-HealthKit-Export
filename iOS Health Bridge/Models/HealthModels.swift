@@ -32,11 +32,11 @@ enum TimePeriod: String, CaseIterable, Identifiable {
     func startDate(relativeTo end: Date = Date()) -> Date {
         let cal = Calendar.current
         switch self {
-        case .day:     return cal.date(byAdding: .hour,       value: -24, to: end) ?? end
-        case .week:    return cal.date(byAdding: .weekOfYear, value: -1,  to: end) ?? end
-        case .month:   return cal.date(byAdding: .month,      value: -1,  to: end) ?? end
-        case .year:    return cal.date(byAdding: .year,       value: -1,  to: end) ?? end
-        case .allTime: return cal.date(byAdding: .year,       value: -10, to: end) ?? end
+        case .day:     return cal.startOfDay(for: end)
+        case .week:    return cal.date(byAdding: .weekOfYear, value: -1,  to: cal.startOfDay(for: end)) ?? end
+        case .month:   return cal.date(byAdding: .month,      value: -1,  to: cal.startOfDay(for: end)) ?? end
+        case .year:    return cal.date(byAdding: .year,       value: -1,  to: cal.startOfDay(for: end)) ?? end
+        case .allTime: return cal.date(byAdding: .year,       value: -10, to: cal.startOfDay(for: end)) ?? end
         }
     }
 
