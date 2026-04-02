@@ -4,6 +4,78 @@ import Testing
 @testable import iOS_Health_Bridge
 
 struct iOS_Health_BridgeTests {
+    @Test func exportDocumentBuilderCSVQuotesFieldsAndSortsByDate() throws {
+        let records = [
+            ExportRecord(
+                type: "heart,rate",
+                date: "2026-04-03T09:30:00Z",
+                value: 72,
+                unit: "beats\"per\"minute",
+                source: "Apple Watch"
+            ),
+            ExportRecord(
+                type: "steps",
+                date: "2026-04-01T09:30:00Z",
+                value: 4000,
+                unit: "count",
+                source: "iPhone"
+            )
+        ]
+
+        let csv = try #require(String(data: ExportDocumentBuilder.makeCSV(records: records), encoding: .utf8))
+        let lines = csv.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        #expect(lines[0] == "type,date,value,unit,source")
+        #expect(lines[1] == "\"steps\",\"2026-04-01T09:30:00Z\",4000.0,\"count\",\"iPhone\"")
+        #expect(lines[2] == "\"heart,rate\",\"2026-04-03T09:30:00Z\",72.0,\"beats\"\"per\"\"minute\",\"Apple Watch\"")
+    }
+
+    @Test func exportDocumentBuilderJSONCreatesGroupedEnvelope() throws {
+        let startDate = Date(timeIntervalSince1970: 1_500)
+        let endDate = Date(timeIntervalSince1970: 2_500)
+        let records = [
+            ExportRecord(type: "steps", date: "2026-04-01T00:00:00Z", value: 1234, unit: "steps", source: "iPhone"),
+            ExportRecord(type: "steps", date: "2026-04-02T00:00:00Z", value: 1500, unit: "steps", source: "Apple Watch"),
+            ExportRecord(type: "heartRate", date: "2026-04-02T01:00:00Z", value: 62, unit: "bpm", source: "Apple Watch")
+        ]
+
+        let data = try ExportDocumentBuilder.makeJSON(records: records, startDate: startDate, endDate: endDate)
+        let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let dateRange = try #require(payload["dateRange"] as? [String: String])
+        let dataTypes = try #require(payload["dataTypes"] as? [String: [[String: Any]]])
+
+        #expect(payload["exportVersion"] as? String == "2.0")
+        #expect(payload["deduplication"] as? String == "cumulative metrics use daily HealthKit statistics (Watch+iPhone deduplicated)")
+        #expect(dateRange["start"] == ISO8601DateFormatter().string(from: startDate))
+        #expect(dateRange["end"] == ISO8601DateFormatter().string(from: endDate))
+        #expect(dataTypes.keys.sorted() == ["heartRate", "steps"])
+        #expect(dataTypes["steps"]?.count == 2)
+        #expect(dataTypes["heartRate"]?.first?["unit"] as? String == "bpm")
+    }
+
+    @Test func exportDocumentBuilderXLSXIncludesWorkbookPartsAndTruncatesSheetNames() throws {
+        let longTypeName = "electrocardiogramVoltageMeasurements1234567890"
+        let records = [
+            ExportRecord(type: longTypeName, date: "2026-04-02T09:30:00Z", value: 1.2, unit: "mV", source: "Apple Watch"),
+            ExportRecord(type: "steps", date: "2026-04-01T09:30:00Z", value: 4200, unit: "steps", source: "iPhone")
+        ]
+
+        let xlsx = ExportDocumentBuilder.makeXLSX(records: records)
+        let archive = String(decoding: xlsx, as: UTF8.self)
+        let truncatedSheetName = String(longTypeName.prefix(31))
+
+        #expect(xlsx.starts(with: Data([0x50, 0x4B, 0x03, 0x04])))
+        #expect(archive.contains("[Content_Types].xml"))
+        #expect(archive.contains("xl/workbook.xml"))
+        #expect(archive.contains("xl/sharedStrings.xml"))
+        #expect(archive.contains("xl/worksheets/sheet1.xml"))
+        #expect(archive.contains("xl/worksheets/sheet2.xml"))
+        #expect(archive.contains("xl/worksheets/sheet3.xml"))
+        #expect(archive.contains("All Data"))
+        #expect(archive.contains(truncatedSheetName))
+        #expect(archive.contains("electrocardiogramVoltageMeasurements1234567890") == false)
+    }
+
     @MainActor
     @Test func healthDataManagerMarksAuthorizedWhenAuthorizationIsUnnecessary() async {
         let manager = HealthDataManager(
