@@ -88,8 +88,8 @@ struct IntroView: View {
                         featureRow(
                             symbol: "square.and.arrow.up.fill",
                             color: FormaColors.green,
-                            title: "Automatic Export",
-                            detail: "Nightly JSON export to your chosen folder — free, forever."
+                            title: "Premium Automatic Export",
+                            detail: "Nightly export to your chosen folder, controlled from Settings."
                         )
                     }
 

@@ -135,6 +135,36 @@ struct iOS_Health_BridgeTests {
     }
 
     @MainActor
+    @Test func healthDataManagerSetExportFolderUpdatesObservableStateAndPersistsLatestSelection() throws {
+        let storage = InMemoryHealthDataStore()
+        let firstFolderURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let secondFolderURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: firstFolderURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondFolderURL, withIntermediateDirectories: true)
+
+        let firstBookmark = try firstFolderURL.bookmarkData()
+        let secondBookmark = try secondFolderURL.bookmarkData()
+
+        let manager = HealthDataManager(storage: storage)
+        manager.exportError = "Previous export failure"
+
+        manager.setExportFolder(bookmarkData: firstBookmark, displayName: "First")
+
+        #expect(manager.hasExportFolder)
+        #expect(manager.exportFolderDisplayName == "First")
+        #expect(storage.data(forKey: "exportFolderBookmark") == firstBookmark)
+        #expect(storage.string(forKey: "exportFolderDisplayName") == "First")
+        #expect(manager.exportError == nil)
+
+        manager.setExportFolder(bookmarkData: secondBookmark, displayName: "Second")
+
+        #expect(manager.hasExportFolder)
+        #expect(manager.exportFolderDisplayName == "Second")
+        #expect(storage.data(forKey: "exportFolderBookmark") == secondBookmark)
+        #expect(storage.string(forKey: "exportFolderDisplayName") == "Second")
+    }
+
+    @MainActor
     @Test func subscriptionManagerLoadsPremiumTierFromEntitlements() async {
         let manager = SubscriptionManager(
             productLoader: { _ in [] },
@@ -226,6 +256,29 @@ struct iOS_Health_BridgeTests {
         ))
 
         #expect(nextRun == expected)
+    }
+
+    @Test func backgroundExportSchedulerRequiresPremiumAndOptIn() {
+        #expect(BackgroundExportScheduler.shouldSchedule(tier: .free, automaticExportEnabled: false) == false)
+        #expect(BackgroundExportScheduler.shouldSchedule(tier: .free, automaticExportEnabled: true) == false)
+        #expect(BackgroundExportScheduler.shouldSchedule(tier: .premium, automaticExportEnabled: false) == false)
+        #expect(BackgroundExportScheduler.shouldSchedule(tier: .premium, automaticExportEnabled: true) == true)
+    }
+
+    @Test func backgroundExportSettingsDefaultsToDisabledAndPersistsChanges() {
+        let storage = InMemoryHealthDataStore()
+        let settings = BackgroundExportSettings(storage: storage)
+
+        #expect(settings.isAutomaticExportEnabled == false)
+
+        settings.isAutomaticExportEnabled = true
+
+        #expect(settings.isAutomaticExportEnabled == true)
+        #expect(storage.bool(forKey: "automaticBackgroundExportEnabled") == true)
+
+        let reloaded = BackgroundExportSettings(storage: storage)
+
+        #expect(reloaded.isAutomaticExportEnabled == true)
     }
 
     @Test func timePeriodDayStartsAtBeginningOfDay() {

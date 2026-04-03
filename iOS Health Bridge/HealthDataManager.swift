@@ -45,8 +45,14 @@ final class HealthDataManager {
     }
     var exportError: String?
     var exportFolderDisplayName: String? {
-        get { storage.string(forKey: Self.exportFolderNameKey) }
-        set { storage.set(newValue, forKey: Self.exportFolderNameKey) }
+        didSet {
+            storage.set(exportFolderDisplayName, forKey: Self.exportFolderNameKey)
+        }
+    }
+    private var exportFolderBookmarkData: Data? {
+        didSet {
+            storage.set(exportFolderBookmarkData, forKey: Self.exportFolderBookmarkKey)
+        }
     }
 
     private static let lastExportDateKey = "lastExportDate"
@@ -92,6 +98,8 @@ final class HealthDataManager {
 
         let raw = storage.double(forKey: Self.lastExportDateKey)
         self.lastExportDate = raw > 0 ? Date(timeIntervalSince1970: raw) : nil
+        self.exportFolderDisplayName = storage.string(forKey: Self.exportFolderNameKey)
+        self.exportFolderBookmarkData = storage.data(forKey: Self.exportFolderBookmarkKey)
     }
 
     func checkAuthorizationStatus() async {
@@ -136,17 +144,18 @@ final class HealthDataManager {
     }
 
     var hasExportFolder: Bool {
-        storage.data(forKey: Self.exportFolderBookmarkKey) != nil
+        exportFolderBookmarkData != nil
     }
 
     func setExportFolder(bookmarkData: Data, displayName: String?) {
-        storage.set(bookmarkData, forKey: Self.exportFolderBookmarkKey)
+        exportFolderBookmarkData = bookmarkData
         exportFolderDisplayName = displayName ?? "Folder"
+        exportError = nil
     }
 
     func performExport(format: ExportFormat = .json) async {
         guard isAuthorized else { return }
-        guard let bookmarkData = storage.data(forKey: Self.exportFolderBookmarkKey) else {
+        guard let bookmarkData = exportFolderBookmarkData else {
             exportError = "Set export folder first"
             return
         }

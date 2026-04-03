@@ -11,6 +11,8 @@ import SwiftUI
 
 struct ExportView: View {
     @Bindable var healthManager : HealthDataManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(BackgroundExportSettings.self) private var backgroundExportSettings
     @State private var isExporting      = false
     @State private var showFolderPicker = false
     @State private var showSuccess      = false
@@ -206,11 +208,21 @@ struct ExportView: View {
     }
 
     private var infoFooter: some View {
-        Text("Exports run automatically every night at midnight.\nEnsure Background App Refresh is enabled in Settings.")
-            .font(FormaType.caption())
-            .foregroundStyle(FormaColors.subtext)
-            .multilineTextAlignment(.center)
-            .padding(.top, 4)
+        Group {
+            if subscriptionManager.tier == .premium {
+                Text(
+                    backgroundExportSettings.isAutomaticExportEnabled
+                    ? "Automatic midnight export is on. Manage it in Settings and keep Background App Refresh enabled."
+                    : "Automatic midnight export is a premium feature. Turn it on in Settings when you want nightly exports."
+                )
+            } else {
+                Text("Automatic midnight export is a premium feature. Upgrade to unlock nightly exports and manage them in Settings.")
+            }
+        }
+        .font(FormaType.caption())
+        .foregroundStyle(FormaColors.subtext)
+        .multilineTextAlignment(.center)
+        .padding(.top, 4)
     }
 
     @ViewBuilder

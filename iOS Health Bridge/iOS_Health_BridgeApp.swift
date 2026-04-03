@@ -8,6 +8,8 @@ import BackgroundTasks
 import OSLog
 
 enum BackgroundExportScheduler {
+    static let taskIdentifier = "PolyphasicDevs.iOS-Health-Bridge.HealthExport"
+
     static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date? {
         var components = calendar.dateComponents([.year, .month, .day], from: date)
         components.day = (components.day ?? 0) + 1
@@ -16,12 +18,17 @@ enum BackgroundExportScheduler {
         components.second = 0
         return calendar.date(from: components)
     }
+
+    static func shouldSchedule(tier: SubscriptionTier, automaticExportEnabled: Bool) -> Bool {
+        tier == .premium && automaticExportEnabled
+    }
 }
 
 @main
 struct iOS_Health_BridgeApp: App {
 
     @State private var subscriptionManager = SubscriptionManager()
+    @State private var backgroundExportSettings = BackgroundExportSettings()
 
     init() {
         registerBackgroundTasks()
@@ -33,12 +40,20 @@ struct iOS_Health_BridgeApp: App {
                 ContentView()
             }
             .environment(subscriptionManager)
+            .environment(backgroundExportSettings)
             .preferredColorScheme(.dark)
             .onAppear {
-                scheduleNextExport()
+                reconcileBackgroundExportSchedule()
             }
             .task {
                 await subscriptionManager.loadSubscriptionStatus()
+                reconcileBackgroundExportSchedule()
+            }
+            .onChange(of: subscriptionManager.tier) { _, _ in
+                reconcileBackgroundExportSchedule()
+            }
+            .onChange(of: backgroundExportSettings.isAutomaticExportEnabled) { _, _ in
+                reconcileBackgroundExportSchedule()
             }
         }
     }
@@ -49,7 +64,7 @@ struct iOS_Health_BridgeApp: App {
         // BGProcessingTask gives minutes of execution time — necessary for all
         // parallel HealthKit queries to complete before the task expires.
         BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: "PolyphasicDevs.iOS-Health-Bridge.HealthExport",
+            forTaskWithIdentifier: BackgroundExportScheduler.taskIdentifier,
             using: nil
         ) { task in
             handleHealthExport(task: task as? BGProcessingTask)
@@ -57,9 +72,21 @@ struct iOS_Health_BridgeApp: App {
     }
 
     private func handleHealthExport(task: BGProcessingTask?) {
-        scheduleNextExport()
+        reconcileBackgroundExportSchedule()
 
         let exportTask = Task { @MainActor in
+            let exportSettings = BackgroundExportSettings()
+            let subscriptionManager = SubscriptionManager()
+            await subscriptionManager.loadSubscriptionStatus()
+
+            guard BackgroundExportScheduler.shouldSchedule(
+                tier: subscriptionManager.tier,
+                automaticExportEnabled: exportSettings.isAutomaticExportEnabled
+            ) else {
+                task?.setTaskCompleted(success: true)
+                return
+            }
+
             let manager = HealthDataManager()
             await manager.checkAuthorizationStatus()
             guard manager.isAuthorized else {
@@ -76,9 +103,23 @@ struct iOS_Health_BridgeApp: App {
         }
     }
 
+    private func reconcileBackgroundExportSchedule() {
+        guard BackgroundExportScheduler.shouldSchedule(
+            tier: subscriptionManager.tier,
+            automaticExportEnabled: backgroundExportSettings.isAutomaticExportEnabled
+        ) else {
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: BackgroundExportScheduler.taskIdentifier)
+            return
+        }
+
+        scheduleNextExport()
+    }
+
     private func scheduleNextExport() {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: BackgroundExportScheduler.taskIdentifier)
+
         let request = BGProcessingTaskRequest(
-            identifier: "PolyphasicDevs.iOS-Health-Bridge.HealthExport"
+            identifier: BackgroundExportScheduler.taskIdentifier
         )
         request.earliestBeginDate = BackgroundExportScheduler.nextMidnight(after: Date())
         request.requiresNetworkConnectivity = false

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
+    @Environment(BackgroundExportSettings.self) private var backgroundExportSettings
     @State private var showPaywall = false
     @State private var showRestoreAlert = false
     @State private var restoreMessage = ""
@@ -20,6 +21,11 @@ struct SettingsView: View {
                     // Subscription status
                     Section {
                         subscriptionRow
+                    }
+                    .listRowBackground(FormaColors.card)
+
+                    Section("Export Automation") {
+                        automaticExportRow
                     }
                     .listRowBackground(FormaColors.card)
 
@@ -114,6 +120,48 @@ struct SettingsView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var automaticExportRow: some View {
+        Group {
+            if subscriptionManager.tier == .premium {
+                Toggle(isOn: Binding(
+                    get: { backgroundExportSettings.isAutomaticExportEnabled },
+                    set: { backgroundExportSettings.isAutomaticExportEnabled = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic Midnight Export")
+                            .foregroundStyle(FormaColors.textPrimary)
+                        Text("Run a nightly export to your selected folder.")
+                            .font(FormaType.caption())
+                            .foregroundStyle(FormaColors.subtext)
+                    }
+                }
+                .tint(FormaColors.teal)
+            } else {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic Midnight Export")
+                            .foregroundStyle(FormaColors.textPrimary)
+                        Text("Premium only. Upgrade to turn on nightly exports.")
+                            .font(FormaType.caption())
+                            .foregroundStyle(FormaColors.subtext)
+                    }
+
+                    Spacer()
+
+                    Button { showPaywall = true } label: {
+                        Text("Upgrade")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(FormaColors.background)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(FormaColors.teal)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
     }
 
     private func infoRow(label: String, value: String) -> some View {
