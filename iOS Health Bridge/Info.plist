@@ -6,6 +6,10 @@
 	<array>
 		<string>PolyphasicDevs.iOS-Health-Bridge.HealthExport</string>
 	</array>
+	<key>FORMA_AI_MODEL</key>
+	<string>gpt-5.4</string>
+	<key>FORMA_AI_PROXY_URL</key>
+	<string>https://coach-pdyq54lgpa-nw.a.run.app</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>

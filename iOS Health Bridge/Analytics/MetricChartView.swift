@@ -3,6 +3,7 @@ import Charts
 
 struct MetricChartView: View {
     let summary: MetricSummary
+    var measurementSystem: MeasurementSystem = .metric
     var showAxes: Bool = true
     var height: CGFloat = 140
 
@@ -105,19 +106,21 @@ struct MetricChartView: View {
     }
 
     private func formatAxisValue(_ value: Double, metric: HealthMetricType) -> String {
-        let rounded = Double(Int(value))
+        let convertedValue = metric.convertedValue(value, for: measurementSystem)
+        let rounded = Double(Int(convertedValue))
+        let unit = metric.displayUnit(for: measurementSystem)
 
         switch metric {
         case .heartRate, .restingHeartRate, .respiratoryRate:
             return "\(Int(rounded))"
         case .sleepDuration:
-            return String(format: "%.1fh", value)
+            return String(format: "%.1fh", convertedValue)
         case .distance:
-            return String(format: "%.1f km", value)
+            return String(format: "%.1f %@", convertedValue, unit)
         case .activeEnergy:
-            return String(format: "%.0f kcal", value)
+            return String(format: "%.0f kcal", convertedValue)
         case .oxygenSaturation:
-            return String(format: "%.0f%%", value)
+            return String(format: "%.0f%%", convertedValue)
         default:
             return "\(Int(rounded))"
         }

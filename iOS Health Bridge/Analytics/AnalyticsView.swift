@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AnalyticsView: View {
     var healthManager: HealthDataManager
+    @Environment(MeasurementSettings.self) private var measurementSettings
     @State private var dataService: AnalyticsDataService
     @State private var selectedPeriod: TimePeriod = .week
     @State private var summaries: [MetricSummary] = []
@@ -52,7 +53,12 @@ struct AnalyticsView: View {
             .sheet(isPresented: $showDetailSheet) {
                 if let selectedMetric = selectedMetric,
                    let summary = summaries.first(where: { $0.metricType == selectedMetric }) {
-                    MetricDetailSheet(summary: summary)
+                    MetricDetailSheet(
+                        metricType: selectedMetric,
+                        period: selectedPeriod,
+                        initialSummary: summary,
+                        healthManager: healthManager
+                    )
                 }
             }
         }
@@ -97,6 +103,7 @@ struct AnalyticsView: View {
                let summary = summaries.first(where: { $0.metricType == selectedMetric }) {
                 MetricChartView(
                     summary: summary,
+                    measurementSystem: measurementSettings.measurementSystem,
                     showAxes: true,
                     height: 220
                 )
@@ -109,6 +116,7 @@ struct AnalyticsView: View {
             } else {
                 MetricChartView(
                     summary: summaries.first(where: { $0.metricType == .steps }) ?? mockSummary,
+                    measurementSystem: measurementSettings.measurementSystem,
                     showAxes: true,
                     height: 220
                 )
@@ -199,6 +207,7 @@ struct AnalyticsView: View {
 struct MetricSummaryCard: View {
     let summary: MetricSummary
     let onTap: () -> Void
+    @Environment(MeasurementSettings.self) private var measurementSettings
     @State private var isPressed = false
 
     var body: some View {
@@ -227,12 +236,12 @@ struct MetricSummaryCard: View {
 
                 // Middle: Large Display Value
                 HStack(alignment: .bottom, spacing: 4) {
-                    Text(summary.formattedDisplay)
+                    Text(summary.formattedDisplay(measurementSystem: measurementSettings.measurementSystem))
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(FormaColors.textPrimary)
                         .lineLimit(1)
 
-                    Text(summary.metricType.unit)
+                    Text(summary.metricType.displayUnit(for: measurementSettings.measurementSystem))
                         .font(.caption)
                         .foregroundColor(FormaColors.subtext)
                         .padding(.bottom, 2)
@@ -284,8 +293,23 @@ struct MetricSummaryCard: View {
 // MARK: - MetricDetailSheet
 
 struct MetricDetailSheet: View {
-    let summary: MetricSummary
+    let metricType: HealthMetricType
+    let period: TimePeriod
+    let healthManager: HealthDataManager
+
     @Environment(\.dismiss) var dismiss
+    @Environment(MeasurementSettings.self) private var measurementSettings
+    @State private var dataService: AnalyticsDataService
+    @State private var summary: MetricSummary
+    @State private var referenceDate = Date()
+
+    init(metricType: HealthMetricType, period: TimePeriod, initialSummary: MetricSummary, healthManager: HealthDataManager) {
+        self.metricType = metricType
+        self.period = period
+        self.healthManager = healthManager
+        _summary = State(initialValue: initialSummary)
+        _dataService = State(initialValue: AnalyticsDataService(healthStore: healthManager.healthStore))
+    }
 
     var body: some View {
         ZStack {
@@ -293,20 +317,19 @@ struct MetricDetailSheet: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
-                            Image(systemName: summary.metricType.sfSymbol)
+                            Image(systemName: metricType.sfSymbol)
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(summary.metricType.accentColor)
+                                .foregroundColor(metricType.accentColor)
 
-                            Text(summary.metricType.rawValue.capitalized)
+                            Text(metricType.rawValue.capitalized)
                                 .font(.headline)
                                 .foregroundColor(FormaColors.textPrimary)
                         }
 
-                        Text(summary.period.rawValue)
+                        Text(headerSubtitle)
                             .font(.caption)
                             .foregroundColor(FormaColors.subtext)
                     }
@@ -324,9 +347,9 @@ struct MetricDetailSheet: View {
 
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Large Chart
                         MetricChartView(
                             summary: summary,
+                            measurementSystem: measurementSettings.measurementSystem,
                             showAxes: true,
                             height: 240
                         )
@@ -334,28 +357,26 @@ struct MetricDetailSheet: View {
                         .background(FormaColors.card)
                         .cornerRadius(12)
 
-                        // Stats Row
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                             StatBox(
                                 label: "Average",
-                                value: summary.formatted(summary.average),
-                                unit: summary.metricType.unit
+                                value: summary.formatted(summary.average, measurementSystem: measurementSettings.measurementSystem),
+                                unit: metricType.displayUnit(for: measurementSettings.measurementSystem)
                             )
 
                             StatBox(
                                 label: "Minimum",
-                                value: summary.formatted(summary.minimum),
-                                unit: summary.metricType.unit
+                                value: summary.formatted(summary.minimum, measurementSystem: measurementSettings.measurementSystem),
+                                unit: metricType.displayUnit(for: measurementSettings.measurementSystem)
                             )
 
                             StatBox(
                                 label: "Maximum",
-                                value: summary.formatted(summary.maximum),
-                                unit: summary.metricType.unit
+                                value: summary.formatted(summary.maximum, measurementSystem: measurementSettings.measurementSystem),
+                                unit: metricType.displayUnit(for: measurementSettings.measurementSystem)
                             )
                         }
 
-                        // Period Comparison
                         if let percentChange = summary.percentChange {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Period Comparison")
@@ -369,11 +390,11 @@ struct MetricDetailSheet: View {
                                             .foregroundColor(FormaColors.subtext)
 
                                         HStack(spacing: 6) {
-                                            Text(summary.formatted(summary.average))
+                                            Text(summary.formatted(summary.average, measurementSystem: measurementSettings.measurementSystem))
                                                 .font(.system(size: 20, weight: .semibold))
                                                 .foregroundColor(FormaColors.textPrimary)
 
-                                            Text(summary.metricType.unit)
+                                            Text(metricType.displayUnit(for: measurementSettings.measurementSystem))
                                                 .font(.caption)
                                                 .foregroundColor(FormaColors.subtext)
                                         }
@@ -402,7 +423,6 @@ struct MetricDetailSheet: View {
                             }
                         }
 
-                        // Data Points List
                         if !summary.dataPoints.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Data Points")
@@ -418,11 +438,11 @@ struct MetricDetailSheet: View {
                                                 .frame(maxWidth: .infinity, alignment: .leading)
 
                                             HStack(spacing: 4) {
-                                                Text(summary.formatted(point.value))
+                                                Text(summary.formatted(point.value, measurementSystem: measurementSettings.measurementSystem))
                                                     .font(.system(.caption, design: .monospaced))
                                                     .foregroundColor(FormaColors.textPrimary)
 
-                                                Text(summary.metricType.unit)
+                                                Text(metricType.displayUnit(for: measurementSettings.measurementSystem))
                                                     .font(.caption2)
                                                     .foregroundColor(FormaColors.subtext)
                                             }
@@ -449,6 +469,24 @@ struct MetricDetailSheet: View {
                 }
             }
         }
+        .task {
+            await loadSummary()
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { gesture in
+                    guard abs(gesture.translation.width) > abs(gesture.translation.height) else { return }
+                    if gesture.translation.width < -60 {
+                        shiftReferenceDate(by: 1)
+                    } else if gesture.translation.width > 60 {
+                        shiftReferenceDate(by: -1)
+                    }
+                }
+        )
+    }
+
+    private var headerSubtitle: String {
+        "\(period.rawValue) • \(intervalFormatter.string(from: summary.dataPoints.first?.date ?? referenceDate, to: summary.dataPoints.last?.date ?? referenceDate))"
     }
 
     private var dateFormatter: DateFormatter {
@@ -456,6 +494,28 @@ struct MetricDetailSheet: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter
+    }
+
+    private var intervalFormatter: DateIntervalFormatter {
+        let formatter = DateIntervalFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }
+
+    private func shiftReferenceDate(by periods: Int) {
+        let candidate = period.shiftedEndDate(relativeTo: referenceDate, by: periods)
+        referenceDate = min(candidate, Date())
+
+        Task {
+            await loadSummary()
+        }
+    }
+
+    private func loadSummary() async {
+        if let updatedSummary = await dataService.fetchSummary(for: metricType, period: period, endingAt: referenceDate) {
+            summary = updatedSummary
+        }
     }
 }
 
@@ -494,4 +554,5 @@ struct StatBox: View {
 
 #Preview {
     AnalyticsView(healthManager: HealthDataManager())
+        .environment(MeasurementSettings())
 }

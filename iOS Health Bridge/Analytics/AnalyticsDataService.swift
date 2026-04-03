@@ -42,6 +42,22 @@ enum AnalyticsComputation {
             return DateComponents(month: 1)
         }
     }
+
+    static func goalValue(
+        from dataPoints: [AggregatedDataPoint],
+        metric: HealthMetricType
+    ) -> Double {
+        guard !dataPoints.isEmpty else {
+            return 0
+        }
+
+        switch metric.aggregationMethod {
+        case .sum:
+            return dataPoints.map(\.value).reduce(0, +)
+        case .average:
+            return dataPoints.last?.value ?? 0
+        }
+    }
 }
 
 @Observable final class AnalyticsDataService {
@@ -53,8 +69,11 @@ enum AnalyticsComputation {
 
     // MARK: - Main API
 
-    func fetchSummary(for metric: HealthMetricType, period: TimePeriod) async -> MetricSummary? {
-        let endDate = Date()
+    func fetchSummary(
+        for metric: HealthMetricType,
+        period: TimePeriod,
+        endingAt endDate: Date = Date()
+    ) async -> MetricSummary? {
         let startDate = period.startDate(relativeTo: endDate)
 
         let dataPoints = await aggregateHealthData(
@@ -107,14 +126,14 @@ enum AnalyticsComputation {
         )
     }
 
-    func fetchAllSummaries(period: TimePeriod) async -> [MetricSummary] {
+    func fetchAllSummaries(period: TimePeriod, endingAt endDate: Date = Date()) async -> [MetricSummary] {
         var summaries: [MetricSummary] = []
         summaries.reserveCapacity(HealthMetricType.allCases.count)
 
         await withTaskGroup(of: MetricSummary?.self) { group in
             for metric in HealthMetricType.allCases {
                 group.addTask { [weak self] in
-                    await self?.fetchSummary(for: metric, period: period)
+                    await self?.fetchSummary(for: metric, period: period, endingAt: endDate)
                 }
             }
 
@@ -126,6 +145,24 @@ enum AnalyticsComputation {
         }
 
         return summaries
+    }
+
+    func fetchGoalValue(
+        for metric: HealthMetricType,
+        period: HealthGoal.GoalPeriod,
+        relativeTo referenceDate: Date = Date()
+    ) async -> Double {
+        let interval = period.interval(containing: referenceDate)
+        let bucketComponent: Calendar.Component = period == .daily ? .hour : .day
+
+        let dataPoints = await aggregateHealthData(
+            for: metric,
+            from: interval.start,
+            to: interval.end,
+            bucketComponent: bucketComponent
+        )
+
+        return AnalyticsComputation.goalValue(from: dataPoints, metric: metric)
     }
 
     // MARK: - Private Helpers

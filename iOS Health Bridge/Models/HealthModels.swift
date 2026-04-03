@@ -50,6 +50,25 @@ enum TimePeriod: String, CaseIterable, Identifiable {
         case .allTime: return .month
         }
     }
+
+    func shiftedEndDate(
+        relativeTo end: Date,
+        by periods: Int,
+        calendar: Calendar = .current
+    ) -> Date {
+        switch self {
+        case .day:
+            return calendar.date(byAdding: .day, value: periods, to: end) ?? end
+        case .week:
+            return calendar.date(byAdding: .weekOfYear, value: periods, to: end) ?? end
+        case .month:
+            return calendar.date(byAdding: .month, value: periods, to: end) ?? end
+        case .year:
+            return calendar.date(byAdding: .year, value: periods, to: end) ?? end
+        case .allTime:
+            return calendar.date(byAdding: .year, value: periods, to: end) ?? end
+        }
+    }
 }
 
 // MARK: - Metric Type
@@ -69,17 +88,52 @@ enum HealthMetricType: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 
     var unit: String {
+        displayUnit(for: .metric)
+    }
+
+    func displayUnit(for measurementSystem: MeasurementSystem) -> String {
         switch self {
         case .steps:            return "steps"
-        case .distance:         return "km"
+        case .distance:         return measurementSystem == .imperial ? "mi" : "km"
         case .activeEnergy:     return "kcal"
         case .heartRate,
              .restingHeartRate: return "bpm"
         case .sleepDuration:    return "hrs"
         case .workoutCount:     return "workouts"
-        case .bodyMass:         return "kg"
+        case .bodyMass:         return measurementSystem == .imperial ? "lb" : "kg"
         case .oxygenSaturation: return "%"
         case .respiratoryRate:  return "brpm"
+        }
+    }
+
+    func convertedValue(_ value: Double, for measurementSystem: MeasurementSystem) -> Double {
+        switch self {
+        case .distance:
+            return measurementSystem == .imperial ? value * 0.621_371 : value
+        case .bodyMass:
+            return measurementSystem == .imperial ? value * 2.204_62 : value
+        default:
+            return value
+        }
+    }
+
+    func formattedGoalValue(
+        _ value: Double,
+        measurementSystem: MeasurementSystem = .metric
+    ) -> String {
+        let displayValue = convertedValue(value, for: measurementSystem)
+
+        switch self {
+        case .steps, .activeEnergy, .heartRate, .restingHeartRate, .respiratoryRate:
+            return String(format: "%.0f", displayValue)
+        case .distance:
+            return String(format: "%.1f", displayValue)
+        case .sleepDuration, .bodyMass:
+            return String(format: "%.1f", displayValue)
+        case .workoutCount:
+            return "\(Int(displayValue.rounded()))"
+        case .oxygenSaturation:
+            return String(format: "%.0f", displayValue)
         }
     }
 
@@ -194,30 +248,34 @@ struct MetricSummary: Identifiable {
         }
     }
 
-    func formatted(_ value: Double) -> String {
+    func formatted(_ value: Double, measurementSystem: MeasurementSystem = .metric) -> String {
+        let displayValue = metricType.convertedValue(value, for: measurementSystem)
+
         switch metricType {
         case .steps:
-            return value >= 1000
-                ? String(format: "%.1fk", value / 1000)
-                : String(format: "%.0f", value)
+            return displayValue >= 1000
+                ? String(format: "%.1fk", displayValue / 1000)
+                : String(format: "%.0f", displayValue)
         case .distance:
-            return String(format: "%.2f", value)
+            return String(format: "%.2f", displayValue)
         case .activeEnergy:
-            return String(format: "%.0f", value)
+            return String(format: "%.0f", displayValue)
         case .heartRate, .restingHeartRate, .respiratoryRate:
-            return String(format: "%.0f", value)
+            return String(format: "%.0f", displayValue)
         case .sleepDuration:
-            return String(format: "%.1f", value)
+            return String(format: "%.1f", displayValue)
         case .workoutCount:
-            return String(format: "%.0f", value)
+            return String(format: "%.0f", displayValue)
         case .bodyMass:
-            return String(format: "%.1f", value)
+            return String(format: "%.1f", displayValue)
         case .oxygenSaturation:
-            return String(format: "%.0f", value * 100)
+            return String(format: "%.0f", displayValue * 100)
         }
     }
 
-    var formattedDisplay: String { formatted(displayValue) }
+    func formattedDisplay(measurementSystem: MeasurementSystem = .metric) -> String {
+        formatted(displayValue, measurementSystem: measurementSystem)
+    }
 }
 
 // MARK: - Insights
@@ -278,21 +336,24 @@ struct PersonalRecord: Codable, Identifiable, Equatable {
         self.date       = date
     }
 
-    var formattedValue: String {
+    func formattedValue(measurementSystem: MeasurementSystem = .metric) -> String {
+        let displayValue = metricType.convertedValue(value, for: measurementSystem)
+        let displayUnit = metricType.displayUnit(for: measurementSystem)
+
         switch metricType {
         case .steps:
-            return value >= 1000
-                ? String(format: "%.1fk steps", value / 1000)
-                : String(format: "%.0f steps", value)
-        case .distance:         return String(format: "%.2f km", value)
-        case .activeEnergy:     return String(format: "%.0f kcal", value)
+            return displayValue >= 1000
+                ? String(format: "%.1fk steps", displayValue / 1000)
+                : String(format: "%.0f steps", displayValue)
+        case .distance:         return String(format: "%.2f %@", displayValue, displayUnit)
+        case .activeEnergy:     return String(format: "%.0f kcal", displayValue)
         case .heartRate,
              .restingHeartRate,
-             .respiratoryRate:  return String(format: "%.0f \(metricType.unit)", value)
-        case .sleepDuration:    return String(format: "%.1f hrs", value)
-        case .workoutCount:     return "\(Int(value)) workouts"
-        case .bodyMass:         return String(format: "%.1f kg", value)
-        case .oxygenSaturation: return String(format: "%.0f%%", value * 100)
+             .respiratoryRate:  return String(format: "%.0f %@", displayValue, displayUnit)
+        case .sleepDuration:    return String(format: "%.1f hrs", displayValue)
+        case .workoutCount:     return "\(Int(displayValue)) workouts"
+        case .bodyMass:         return String(format: "%.1f %@", displayValue, displayUnit)
+        case .oxygenSaturation: return String(format: "%.0f%%", displayValue * 100)
         }
     }
 }
@@ -318,6 +379,39 @@ struct HealthGoal: Codable, Identifiable {
         case daily   = "Daily"
         case weekly  = "Weekly"
         case monthly = "Monthly"
+
+        var label: String {
+            switch self {
+            case .daily:
+                return "Today"
+            case .weekly:
+                return "This Week"
+            case .monthly:
+                return "This Month"
+            }
+        }
+
+        func interval(
+            containing referenceDate: Date = Date(),
+            calendar: Calendar = .current
+        ) -> DateInterval {
+            switch self {
+            case .daily:
+                let start = calendar.startOfDay(for: referenceDate)
+                let end = calendar.date(byAdding: .day, value: 1, to: start) ?? referenceDate
+                return DateInterval(start: start, end: end)
+            case .weekly:
+                if let interval = calendar.dateInterval(of: .weekOfYear, for: referenceDate) {
+                    return interval
+                }
+            case .monthly:
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
+                    return interval
+                }
+            }
+
+            return DateInterval(start: referenceDate, end: referenceDate)
+        }
     }
 }
 

@@ -86,7 +86,7 @@ struct PaywallView: View {
             VStack(alignment: .leading, spacing: 12) {
                 featureRow(icon: "bolt.fill", text: "Advanced performance analytics")
                 featureRow(icon: "heart.fill", text: "Real-time recovery tracking")
-                featureRow(icon: "brain.head.profile", text: "AI-powered insights & recommendations")
+                featureRow(icon: "brain.head.profile", text: "Tailored AI coach with your health context")
                 featureRow(icon: "chart.line.uptrend.xyaxis", text: "Custom training plans")
                 featureRow(icon: "calendar.badge.plus", text: "Unlimited historical data")
                 featureRow(icon: "person.badge.shield.checkmark.fill", text: "Priority support")

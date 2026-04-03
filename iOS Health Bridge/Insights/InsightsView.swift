@@ -8,10 +8,12 @@ import SwiftUI
 struct InsightsView: View {
     var healthManager: HealthDataManager
 
+    @Environment(MeasurementSettings.self) private var measurementSettings
     @State private var dataService   : AnalyticsDataService
     @State private var insights      : [HealthInsight] = []
     @State private var summaries     : [MetricSummary] = []
     @State private var selectedPeriod: TimePeriod = .week
+    @State private var selectedMetric: HealthMetricType = .steps
     @State private var isLoading     = false
 
     @AppStorage("insightsAIDismissed") private var disclaimerDismissed = false
@@ -86,6 +88,9 @@ struct InsightsView: View {
     private var insightsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if let featuredSummary {
+                    insightsChartSection(summary: featuredSummary)
+                }
 
                 // Dismissible AI disclaimer
                 if !disclaimerDismissed {
@@ -124,6 +129,64 @@ struct InsightsView: View {
         }
     }
 
+    @ViewBuilder
+    private func insightsChartSection(summary: MetricSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Trend Snapshot")
+                        .font(.headline)
+                        .foregroundStyle(FormaColors.textPrimary)
+                    Text(selectedPeriod == .day ? "Current pace across today" : "Recent movement in your health data")
+                        .font(FormaType.caption())
+                        .foregroundStyle(FormaColors.subtext)
+                }
+
+                Spacer()
+
+                MetricBadge(
+                    text: summary.metricType.rawValue,
+                    color: summary.metricType.accentColor
+                )
+            }
+
+            MetricChartView(
+                summary: summary,
+                measurementSystem: measurementSettings.measurementSystem,
+                showAxes: true,
+                height: 180
+            )
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(chartMetrics, id: \.self) { metric in
+                        Button {
+                            withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+                                selectedMetric = metric
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: metric.sfSymbol)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(metric.rawValue)
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundStyle(selectedMetric == metric ? FormaColors.background : FormaColors.subtext)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(selectedMetric == metric ? metric.accentColor : FormaColors.surface)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(FormaColors.card)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     // MARK: - Load
 
     private func loadInsights() async {
@@ -131,6 +194,36 @@ struct InsightsView: View {
         defer { isLoading = false }
         summaries = await dataService.fetchAllSummaries(period: selectedPeriod)
         insights  = trendEngine.generateInsights(from: summaries, period: selectedPeriod)
+
+        if summaries.contains(where: { $0.metricType == selectedMetric }) == false,
+           let fallbackMetric = chartMetrics.first {
+            selectedMetric = fallbackMetric
+        }
+    }
+
+    private var featuredSummary: MetricSummary? {
+        if let selectedSummary = summaries.first(where: { $0.metricType == selectedMetric }) {
+            return selectedSummary
+        }
+
+        return chartMetrics.compactMap { metric in
+            summaries.first(where: { $0.metricType == metric })
+        }.first
+    }
+
+    private var chartMetrics: [HealthMetricType] {
+        let preferredOrder: [HealthMetricType] = [
+            .steps,
+            .activeEnergy,
+            .sleepDuration,
+            .workoutCount,
+            .restingHeartRate,
+            .bodyMass
+        ]
+
+        return preferredOrder.filter { metric in
+            summaries.contains(where: { $0.metricType == metric })
+        }
     }
 }
 

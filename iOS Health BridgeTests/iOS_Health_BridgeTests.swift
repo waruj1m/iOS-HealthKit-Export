@@ -281,6 +281,52 @@ struct iOS_Health_BridgeTests {
         #expect(reloaded.isAutomaticExportEnabled == true)
     }
 
+    @Test func measurementSettingsDefaultsToMetricAndPersistsImperialSelection() {
+        let storage = InMemoryHealthDataStore()
+        let settings = MeasurementSettings(storage: storage)
+
+        #expect(settings.measurementSystem == .metric)
+
+        settings.measurementSystem = .imperial
+
+        #expect(settings.measurementSystem == .imperial)
+        #expect(storage.string(forKey: "measurementSystem") == "imperial")
+        #expect(MeasurementSettings(storage: storage).measurementSystem == .imperial)
+    }
+
+    @Test func metricDisplayFormattingConvertsDistanceAndBodyMassForImperial() {
+        let distanceSummary = makeSummary(
+            metric: .distance,
+            points: [5.0, 6.0],
+            average: 5.5,
+            total: 11.0
+        )
+        let bodyMassRecord = PersonalRecord(metricType: .bodyMass, value: 80, date: .now)
+
+        #expect(distanceSummary.formattedDisplay(measurementSystem: .metric) == "11.00")
+        #expect(distanceSummary.formattedDisplay(measurementSystem: .imperial) == "6.84")
+        #expect(HealthMetricType.distance.displayUnit(for: .imperial) == "mi")
+        #expect(HealthMetricType.bodyMass.displayUnit(for: .imperial) == "lb")
+        #expect(bodyMassRecord.formattedValue(measurementSystem: .imperial) == "176.4 lb")
+    }
+
+    @Test func timePeriodShiftedEndDateMovesByWholePeriods() {
+        let calendar = Calendar(identifier: .gregorian)
+        let reference = calendar.date(from: DateComponents(
+            timeZone: .gmt,
+            year: 2026,
+            month: 4,
+            day: 3,
+            hour: 12
+        ))!
+
+        let shiftedDay = TimePeriod.day.shiftedEndDate(relativeTo: reference, by: -1, calendar: calendar)
+        let shiftedWeek = TimePeriod.week.shiftedEndDate(relativeTo: reference, by: 1, calendar: calendar)
+
+        #expect(calendar.component(.day, from: shiftedDay) == 2)
+        #expect(calendar.component(.day, from: shiftedWeek) == 10)
+    }
+
     @Test func timePeriodDayStartsAtBeginningOfDay() {
         let calendar = Calendar(identifier: .gregorian)
         let midday = calendar.date(from: DateComponents(
@@ -315,6 +361,66 @@ struct iOS_Health_BridgeTests {
         #expect(start == expected)
     }
 
+    @Test func goalPeriodDailyIntervalSpansCurrentCalendarDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+
+        let referenceDate = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 4,
+            day: 3,
+            hour: 9,
+            minute: 52
+        ))!
+
+        let interval = HealthGoal.GoalPeriod.daily.interval(
+            containing: referenceDate,
+            calendar: calendar
+        )
+
+        #expect(interval.start == calendar.startOfDay(for: referenceDate))
+        #expect(interval.end == calendar.date(byAdding: .day, value: 1, to: interval.start))
+    }
+
+    @Test func goalPeriodWeeklyIntervalUsesCalendarWeek() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+
+        let referenceDate = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 4,
+            day: 3,
+            hour: 9,
+            minute: 52
+        ))!
+
+        let interval = HealthGoal.GoalPeriod.weekly.interval(
+            containing: referenceDate,
+            calendar: calendar
+        )
+        let expected = calendar.dateInterval(of: .weekOfYear, for: referenceDate)
+
+        #expect(interval == expected)
+    }
+
+    @Test func analyticsGoalValueUsesIntervalSumForCumulativeMetrics() {
+        let value = AnalyticsComputation.goalValue(
+            from: makeDataPoints([3400, 2800, 3900]),
+            metric: .steps
+        )
+
+        #expect(value == 10_100)
+    }
+
+    @Test func analyticsGoalValueUsesLatestReadingForDiscreteMetrics() {
+        let value = AnalyticsComputation.goalValue(
+            from: makeDataPoints([81.4, 80.9, 80.2]),
+            metric: .bodyMass
+        )
+
+        #expect(value == 80.2)
+    }
+
     @Test func oxygenSaturationFormattingUsesWholePercentDisplay() {
         let summary = makeSummary(
             metric: .oxygenSaturation,
@@ -323,7 +429,7 @@ struct iOS_Health_BridgeTests {
             total: nil
         )
 
-        #expect(summary.formattedDisplay == "98")
+        #expect(summary.formattedDisplay() == "98")
     }
 
     @Test func trendEngineDetectsActiveStepStreak() {
@@ -401,6 +507,87 @@ struct iOS_Health_BridgeTests {
         #expect(Set(titles).count == titles.count)
     }
 
+    @Test func aiCoachContextSnapshotFormatsMetricAndInsightPayload() {
+        let summaries = [
+            makeSummary(
+                metric: .distance,
+                points: [5.0, 6.0, 7.5],
+                average: 6.17,
+                total: 18.5
+            )
+        ]
+        let insights = [
+            HealthInsight(
+                title: "Recovery trending up",
+                body: "Your recent sleep and resting HR suggest solid recovery.",
+                severity: .positive,
+                category: .recovery,
+                relatedMetrics: [.sleepDuration, .restingHeartRate],
+                generatedAt: .now
+            )
+        ]
+
+        let snapshot = AICoachContextSnapshot.make(
+            measurementSystem: .imperial,
+            weeklySummaries: summaries,
+            monthlySummaries: [],
+            weeklyInsights: insights,
+            monthlyInsights: []
+        )
+
+        #expect(snapshot.measurementSystem == "imperial")
+        #expect(snapshot.weeklyMetrics.count == 1)
+        #expect(snapshot.weeklyMetrics[0].metric == "Distance")
+        #expect(snapshot.weeklyMetrics[0].unit == "mi")
+        #expect(snapshot.weeklyInsights.first?.category == "Recovery")
+    }
+
+    @MainActor
+    @Test func aiCoachSessionAppendsAssistantReplyFromService() async {
+        let session = AICoachSession(
+            healthStore: HKHealthStore(),
+            service: MockAICoachService(reply: "Take an easier session today."),
+            configuration: AICoachConfiguration(
+                proxyURL: URL(string: "https://example.com/coach"),
+                model: "gpt-5.4"
+            )
+        )
+
+        session.contextSnapshot = AICoachContextSnapshot.make(
+            measurementSystem: .metric,
+            weeklySummaries: [],
+            monthlySummaries: [],
+            weeklyInsights: [],
+            monthlyInsights: []
+        )
+
+        await session.send("How am I recovering?", measurementSystem: .metric)
+
+        #expect(session.messages.count == 2)
+        #expect(session.messages[0].role == .user)
+        #expect(session.messages[1].role == .assistant)
+        #expect(session.messages[1].content == "Take an easier session today.")
+    }
+
+    @Test func remoteAiCoachServiceRequiresProxyConfiguration() async {
+        let service = RemoteAICoachService(
+            configuration: AICoachConfiguration(proxyURL: nil, model: "gpt-5.4")
+        )
+
+        await #expect(throws: AICoachServiceError.missingConfiguration) {
+            _ = try await service.send(
+                messages: [],
+                context: AICoachContextSnapshot.make(
+                    measurementSystem: .metric,
+                    weeklySummaries: [],
+                    monthlySummaries: [],
+                    weeklyInsights: [],
+                    monthlyInsights: []
+                )
+            )
+        }
+    }
+
     private func makeSummary(
         metric: HealthMetricType,
         points: [Double],
@@ -445,6 +632,14 @@ struct iOS_Health_BridgeTests {
                 value: value
             )
         }
+    }
+}
+
+private struct MockAICoachService: AICoachServicing {
+    let reply: String
+
+    func send(messages: [AIChatMessage], context: AICoachContextSnapshot) async throws -> AICoachReply {
+        AICoachReply(text: reply)
     }
 }
 

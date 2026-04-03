@@ -29,6 +29,7 @@ struct iOS_Health_BridgeApp: App {
 
     @State private var subscriptionManager = SubscriptionManager()
     @State private var backgroundExportSettings = BackgroundExportSettings()
+    @State private var measurementSettings = MeasurementSettings()
 
     init() {
         registerBackgroundTasks()
@@ -41,6 +42,7 @@ struct iOS_Health_BridgeApp: App {
             }
             .environment(subscriptionManager)
             .environment(backgroundExportSettings)
+            .environment(measurementSettings)
             .preferredColorScheme(.dark)
             .onAppear {
                 reconcileBackgroundExportSchedule()

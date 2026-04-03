@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(BackgroundExportSettings.self) private var backgroundExportSettings
+    @Environment(MeasurementSettings.self) private var measurementSettings
     @State private var showPaywall = false
     @State private var showRestoreAlert = false
     @State private var restoreMessage = ""
@@ -26,6 +27,19 @@ struct SettingsView: View {
 
                     Section("Export Automation") {
                         automaticExportRow
+                    }
+                    .listRowBackground(FormaColors.card)
+
+                    Section("Units") {
+                        Picker("Measurement System", selection: Binding(
+                            get: { measurementSettings.measurementSystem },
+                            set: { measurementSettings.measurementSystem = $0 }
+                        )) {
+                            ForEach(MeasurementSystem.allCases, id: \.self) { system in
+                                Text(system.displayName).tag(system)
+                            }
+                        }
+                        .pickerStyle(.segmented)
                     }
                     .listRowBackground(FormaColors.card)
 

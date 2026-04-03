@@ -5,10 +5,12 @@ struct PersonalRecordsView: View {
     // MARK: - Properties
 
     let healthManager: HealthDataManager
+    @Environment(MeasurementSettings.self) private var measurementSettings
 
     @State private var dataService: AnalyticsDataService
     @State private var recordsManager = PersonalRecordsManager()
     @State private var summaries: [MetricSummary] = []
+    @State private var goalValues: [UUID: Double] = [:]
     @State private var isLoading = false
     @State private var showAddGoal = false
     @State private var newlyBrokenRecord: PersonalRecord?
@@ -60,7 +62,11 @@ struct PersonalRecordsView: View {
             .task {
                 await loadRecords()
             }
-            .sheet(isPresented: $showAddGoal) {
+            .sheet(isPresented: $showAddGoal, onDismiss: {
+                Task {
+                    goalValues = await loadGoalValues()
+                }
+            }) {
                 AddGoalSheet(recordsManager: recordsManager)
             }
         }
@@ -109,9 +115,7 @@ struct PersonalRecordsView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(recordsManager.activeGoals()) { goal in
-                        let currentValue = summaries
-                            .first { $0.metricType == goal.metricType }
-                            .map { $0.displayValue } ?? 0.0
+                        let currentValue = goalValues[goal.id] ?? 0.0
                         let progress = recordsManager.progress(
                             for: goal,
                             currentValue: currentValue
@@ -123,6 +127,10 @@ struct PersonalRecordsView: View {
                             currentValue: currentValue,
                             onDelete: {
                                 recordsManager.removeGoal(id: goal.id)
+                                goalValues.removeValue(forKey: goal.id)
+                                Task {
+                                    goalValues = await loadGoalValues()
+                                }
                             }
                         )
                     }
@@ -151,25 +159,52 @@ struct PersonalRecordsView: View {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            recordsManager.loadFromDisk()
+        recordsManager.loadFromDisk()
 
-            let newSummaries = await dataService.fetchAllSummaries(period: .allTime)
-            self.summaries = newSummaries
+        async let newSummariesTask = dataService.fetchAllSummaries(period: .allTime)
+        async let goalValuesTask = loadGoalValues()
 
-            recordsManager.processNewData(newSummaries)
+        let newSummaries = await newSummariesTask
+        let latestGoalValues = await goalValuesTask
 
-            if let record = recordsManager.recentlyBrokenRecords.first {
-                newlyBrokenRecord = record
-                try await Task.sleep(nanoseconds: 4_000_000_000)
-                withAnimation {
-                    newlyBrokenRecord = nil
+        summaries = newSummaries
+        goalValues = latestGoalValues
+
+        recordsManager.processNewData(newSummaries)
+
+        if let record = recordsManager.recentlyBrokenRecords.first {
+            newlyBrokenRecord = record
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            withAnimation {
+                newlyBrokenRecord = nil
+            }
+        }
+
+        recordsManager.saveToDisk()
+    }
+
+    private func loadGoalValues() async -> [UUID: Double] {
+        let goals = recordsManager.activeGoals()
+        guard !goals.isEmpty else {
+            return [:]
+        }
+
+        return await withTaskGroup(of: (UUID, Double).self, returning: [UUID: Double].self) { group in
+            for goal in goals {
+                group.addTask {
+                    let value = await dataService.fetchGoalValue(
+                        for: goal.metricType,
+                        period: goal.period
+                    )
+                    return (goal.id, value)
                 }
             }
 
-            recordsManager.saveToDisk()
-        } catch {
-            print("Error loading records: \(error)")
+            var values: [UUID: Double] = [:]
+            for await (goalID, value) in group {
+                values[goalID] = value
+            }
+            return values
         }
     }
 }
@@ -179,6 +214,7 @@ struct PersonalRecordsView: View {
 struct RecordCard: View {
     let metricType: HealthMetricType
     let record: PersonalRecord?
+    @Environment(MeasurementSettings.self) private var measurementSettings
 
     var body: some View {
         FormaCard {
@@ -212,7 +248,7 @@ struct RecordCard: View {
                 // Value
                 if let record = record {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(record.formattedValue)
+                        Text(record.formattedValue(measurementSystem: measurementSettings.measurementSystem))
                             .font(.system(size: 20))
                             .fontWeight(.bold)
                             .foregroundColor(FormaColors.textPrimary)
@@ -253,6 +289,7 @@ struct GoalProgressRow: View {
     let currentValue: Double
     let onDelete: () -> Void
 
+    @Environment(MeasurementSettings.self) private var measurementSettings
     @State private var isConfirmingDelete = false
 
     var body: some View {
@@ -271,9 +308,13 @@ struct GoalProgressRow: View {
                         .fontWeight(.semibold)
                         .foregroundColor(FormaColors.textPrimary)
 
-                    Text("\(currentValue.formatted(.number.precision(.fractionLength(1)))) / \(goal.target.formatted(.number.precision(.fractionLength(1)))) \(goal.metricType.unit) · \(goal.period.rawValue.capitalized)")
+                    Text("\(goal.metricType.formattedGoalValue(currentValue, measurementSystem: measurementSettings.measurementSystem)) / \(goal.metricType.formattedGoalValue(goal.target, measurementSystem: measurementSettings.measurementSystem)) \(goal.metricType.displayUnit(for: measurementSettings.measurementSystem))")
                         .font(FormaType.caption())
                         .foregroundColor(FormaColors.subtext)
+
+                    Text(goal.period.label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(goal.metricType.accentColor.opacity(0.9))
                 }
 
                 Spacer()
@@ -281,7 +322,7 @@ struct GoalProgressRow: View {
                 // Right: Circular Progress Ring
                 ZStack {
                     Circle()
-                        .stroke(FormaColors.card, lineWidth: 3)
+                        .stroke(FormaColors.divider, lineWidth: 3)
 
                     Circle()
                         .trim(from: 0, to: progress)
@@ -295,6 +336,7 @@ struct GoalProgressRow: View {
                     Text("\((progress * 100).formatted(.number.precision(.fractionLength(0))))%")
                         .font(FormaType.caption())
                         .fontWeight(.semibold)
+                        .monospacedDigit()
                         .foregroundColor(FormaColors.textPrimary)
                 }
                 .frame(width: 60, height: 60)
@@ -321,6 +363,7 @@ struct GoalProgressRow: View {
 
 struct AddGoalSheet: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(MeasurementSettings.self) private var measurementSettings
     let recordsManager: PersonalRecordsManager
 
     @State private var selectedMetric: HealthMetricType = .steps
@@ -361,7 +404,7 @@ struct AddGoalSheet: View {
                                 .foregroundColor(FormaColors.textPrimary)
                                 .keyboardType(.decimalPad)
 
-                            Text(selectedMetric.unit)
+                            Text(selectedMetric.displayUnit(for: measurementSettings.measurementSystem))
                                 .font(.system(size: 15))
                                 .foregroundColor(FormaColors.subtext)
                         }
@@ -412,10 +455,26 @@ struct AddGoalSheet: View {
     private func saveGoal() {
         recordsManager.setGoal(
             for: selectedMetric,
-            target: targetValue,
+            target: canonicalTargetValue,
             period: selectedPeriod
         )
         dismiss()
+    }
+
+    private var canonicalTargetValue: Double {
+        switch measurementSettings.measurementSystem {
+        case .metric:
+            return targetValue
+        case .imperial:
+            switch selectedMetric {
+            case .distance:
+                return targetValue / 0.621_371
+            case .bodyMass:
+                return targetValue / 2.204_62
+            default:
+                return targetValue
+            }
+        }
     }
 }
 
@@ -423,6 +482,7 @@ struct AddGoalSheet: View {
 
 struct NewRecordBanner: View {
     let record: PersonalRecord
+    @Environment(MeasurementSettings.self) private var measurementSettings
 
     var body: some View {
         VStack(spacing: 8) {
@@ -437,7 +497,7 @@ struct NewRecordBanner: View {
                         .fontWeight(.semibold)
                         .foregroundColor(FormaColors.textPrimary)
 
-                    Text("\(record.metricType.id.uppercased()) – \(record.formattedValue)")
+                    Text("\(record.metricType.id.uppercased()) – \(record.formattedValue(measurementSystem: measurementSettings.measurementSystem))")
                         .font(FormaType.caption())
                         .foregroundColor(FormaColors.subtext)
                 }
@@ -462,4 +522,5 @@ struct NewRecordBanner: View {
 #Preview {
     let mockHealthManager = HealthDataManager()
     PersonalRecordsView(healthManager: mockHealthManager)
+        .environment(MeasurementSettings())
 }

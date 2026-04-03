@@ -18,6 +18,7 @@ struct MainTabView: View {
     enum Tab: Int, CaseIterable {
         case dashboard = 0
         case insights
+        case coach
         case records
         case export
         case settings
@@ -26,6 +27,7 @@ struct MainTabView: View {
             switch self {
             case .dashboard: return "Dashboard"
             case .insights:  return "Insights"
+            case .coach:     return "Coach"
             case .records:   return "Records"
             case .export:    return "Export"
             case .settings:  return "Settings"
@@ -36,6 +38,7 @@ struct MainTabView: View {
             switch self {
             case .dashboard: return "chart.bar.fill"
             case .insights:  return "sparkles"
+            case .coach:     return "bubble.left.and.sparkles.fill"
             case .records:   return "trophy.fill"
             case .export:    return "square.and.arrow.up.fill"
             case .settings:  return "gearshape.fill"
@@ -44,8 +47,8 @@ struct MainTabView: View {
 
         var isPremium: Bool {
             switch self {
-            case .dashboard, .insights, .records: return true
-            case .export, .settings:              return false
+            case .dashboard, .insights, .coach, .records: return true
+            case .export, .settings:                      return false
             }
         }
     }
@@ -61,6 +64,7 @@ struct MainTabView: View {
             }
         }
         .tint(FormaColors.teal)
+        .simultaneousGesture(tabSwipeGesture)
         // Apply dark tab bar styling
         .onAppear { styleTabBar() }
         .sheet(isPresented: $showPaywall) {
@@ -82,6 +86,9 @@ struct MainTabView: View {
             case .insights:
                 InsightsView(healthManager: healthManager)
                     .premiumGated(isLocked: isLocked, onUnlock: { showPaywall = true })
+            case .coach:
+                AICoachView(healthManager: healthManager)
+                    .premiumGated(isLocked: isLocked, onUnlock: { showPaywall = true })
             case .records:
                 PersonalRecordsView(healthManager: healthManager)
                     .premiumGated(isLocked: isLocked, onUnlock: { showPaywall = true })
@@ -98,8 +105,36 @@ struct MainTabView: View {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(FormaColors.surface)
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(FormaColors.teal)
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(FormaColors.teal)]
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor(FormaColors.subtext)
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(FormaColors.subtext)]
         UITabBar.appearance().standardAppearance  = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+
+    private var tabSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { gesture in
+                guard abs(gesture.translation.width) > abs(gesture.translation.height) else { return }
+                if gesture.translation.width < -60 {
+                    moveTabSelection(by: 1)
+                } else if gesture.translation.width > 60 {
+                    moveTabSelection(by: -1)
+                }
+            }
+    }
+
+    private func moveTabSelection(by offset: Int) {
+        let tabs = Tab.allCases
+        guard let currentIndex = tabs.firstIndex(of: selectedTab) else { return }
+
+        let newIndex = min(max(currentIndex + offset, tabs.startIndex), tabs.index(before: tabs.endIndex))
+        guard newIndex != currentIndex else { return }
+
+        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+            selectedTab = tabs[newIndex]
+        }
     }
 }
 
