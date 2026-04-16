@@ -206,6 +206,20 @@ enum HealthMetricType: String, CaseIterable, Codable, Identifiable {
     enum AggregationMethod: Equatable {
         case sum, average
     }
+
+    enum RecordStrategy {
+        case bestValue
+        case latestValue
+    }
+
+    var recordStrategy: RecordStrategy {
+        switch self {
+        case .steps, .distance, .activeEnergy, .sleepDuration, .workoutCount:
+            return .bestValue
+        case .heartRate, .restingHeartRate, .bodyMass, .oxygenSaturation, .respiratoryRate:
+            return .latestValue
+        }
+    }
 }
 
 // MARK: - Aggregated Data
@@ -275,6 +289,27 @@ struct MetricSummary: Identifiable {
 
     func formattedDisplay(measurementSystem: MeasurementSystem = .metric) -> String {
         formatted(displayValue, measurementSystem: measurementSystem)
+    }
+
+    var bestRecordPoint: AggregatedDataPoint? {
+        guard let firstPoint = dataPoints.first else { return nil }
+
+        return dataPoints.dropFirst().reduce(firstPoint) { best, candidate in
+            if metricType.higherIsBetter {
+                return candidate.value > best.value ? candidate : best
+            } else {
+                return candidate.value < best.value ? candidate : best
+            }
+        }
+    }
+
+    var recordPoint: AggregatedDataPoint? {
+        switch metricType.recordStrategy {
+        case .bestValue:
+            return bestRecordPoint
+        case .latestValue:
+            return dataPoints.max(by: { $0.date < $1.date })
+        }
     }
 }
 

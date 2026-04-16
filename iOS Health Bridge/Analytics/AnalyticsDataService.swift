@@ -37,7 +37,7 @@ enum AnalyticsComputation {
         case .day:
             return DateComponents(day: 1)
         case .month:
-            return DateComponents(day: 1)
+            return DateComponents(month: 1)
         default:
             return DateComponents(month: 1)
         }
@@ -53,9 +53,48 @@ enum AnalyticsComputation {
 
         switch metric.aggregationMethod {
         case .sum:
+            if metric == .workoutCount {
+                return Double(dataPoints.filter { $0.value > 0 }.count)
+            }
             return dataPoints.map(\.value).reduce(0, +)
         case .average:
             return dataPoints.last?.value ?? 0
+        }
+    }
+
+    static func mergedDuration(
+        for intervals: [DateInterval]
+    ) -> TimeInterval {
+        guard !intervals.isEmpty else { return 0 }
+
+        let sortedIntervals = intervals.sorted { lhs, rhs in
+            if lhs.start == rhs.start {
+                return lhs.end < rhs.end
+            }
+            return lhs.start < rhs.start
+        }
+
+        var merged: [DateInterval] = []
+        merged.reserveCapacity(sortedIntervals.count)
+
+        for interval in sortedIntervals {
+            guard let last = merged.last else {
+                merged.append(interval)
+                continue
+            }
+
+            if interval.start <= last.end {
+                merged[merged.count - 1] = DateInterval(
+                    start: last.start,
+                    end: max(last.end, interval.end)
+                )
+            } else {
+                merged.append(interval)
+            }
+        }
+
+        return merged.reduce(0) { partialResult, interval in
+            partialResult + interval.duration
         }
     }
 }
@@ -72,15 +111,17 @@ enum AnalyticsComputation {
     func fetchSummary(
         for metric: HealthMetricType,
         period: TimePeriod,
+        bucketComponentOverride: Calendar.Component? = nil,
         endingAt endDate: Date = Date()
     ) async -> MetricSummary? {
         let startDate = period.startDate(relativeTo: endDate)
+        let bucketComponent = bucketComponentOverride ?? period.bucketComponent
 
         let dataPoints = await aggregateHealthData(
             for: metric,
             from: startDate,
             to: endDate,
-            bucketComponent: period.bucketComponent
+            bucketComponent: bucketComponent
         )
 
         guard !dataPoints.isEmpty else {
@@ -102,7 +143,7 @@ enum AnalyticsComputation {
             for: metric,
             from: priorStartDate,
             to: priorEndDate,
-            bucketComponent: period.bucketComponent
+            bucketComponent: bucketComponent
         )
 
         let priorAverage = AnalyticsComputation.average(for: priorDataPoints)
@@ -126,14 +167,23 @@ enum AnalyticsComputation {
         )
     }
 
-    func fetchAllSummaries(period: TimePeriod, endingAt endDate: Date = Date()) async -> [MetricSummary] {
+    func fetchAllSummaries(
+        period: TimePeriod,
+        bucketComponentOverride: Calendar.Component? = nil,
+        endingAt endDate: Date = Date()
+    ) async -> [MetricSummary] {
         var summaries: [MetricSummary] = []
         summaries.reserveCapacity(HealthMetricType.allCases.count)
 
         await withTaskGroup(of: MetricSummary?.self) { group in
             for metric in HealthMetricType.allCases {
                 group.addTask { [weak self] in
-                    await self?.fetchSummary(for: metric, period: period, endingAt: endDate)
+                    await self?.fetchSummary(
+                        for: metric,
+                        period: period,
+                        bucketComponentOverride: bucketComponentOverride,
+                        endingAt: endDate
+                    )
                 }
             }
 
@@ -152,8 +202,17 @@ enum AnalyticsComputation {
         period: HealthGoal.GoalPeriod,
         relativeTo referenceDate: Date = Date()
     ) async -> Double {
+        if metric.recordStrategy == .latestValue {
+            return await fetchLatestValue(for: metric, before: referenceDate)
+        }
+
         let interval = period.interval(containing: referenceDate)
-        let bucketComponent: Calendar.Component = period == .daily ? .hour : .day
+        let bucketComponent: Calendar.Component
+        if metric == .workoutCount {
+            bucketComponent = .day
+        } else {
+            bucketComponent = period == .daily ? .hour : .day
+        }
 
         let dataPoints = await aggregateHealthData(
             for: metric,
@@ -209,7 +268,9 @@ enum AnalyticsComputation {
     ) async -> [AggregatedDataPoint] {
         return await withCheckedContinuation { continuation in
             let interval = AnalyticsComputation.dateInterval(for: bucketComponent)
-            let anchorDate = Calendar.current.startOfDay(for: endDate)
+            let calendar = Calendar.current
+            let anchorDate = calendar.dateInterval(of: bucketComponent, for: endDate)?.start
+                ?? calendar.startOfDay(for: endDate)
 
             let options: HKStatisticsOptions = aggregationMethod == .sum
                 ? .cumulativeSum
@@ -240,14 +301,54 @@ enum AnalyticsComputation {
                     // Unit conversions
                     if metric == .distance {
                         value /= 1000 // meters to km
-                    } else if metric == .oxygenSaturation {
-                        value *= 100 // 0-1 to percentage
                     }
 
-                    dataPoints.append(AggregatedDataPoint(date: stats.endDate, value: value))
+                    dataPoints.append(AggregatedDataPoint(date: stats.startDate, value: value))
                 }
 
                 continuation.resume(returning: dataPoints)
+            }
+
+            healthStore.execute(query)
+        }
+    }
+
+    private func fetchLatestValue(
+        for metric: HealthMetricType,
+        before endDate: Date
+    ) async -> Double {
+        if metric == .sleepDuration || metric == .workoutCount {
+            return 0
+        }
+
+        guard let quantityType = sampleType(for: metric) else {
+            return 0
+        }
+
+        return await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForSamples(
+                withStart: nil,
+                end: endDate,
+                options: .strictEndDate
+            )
+
+            let query = HKSampleQuery(
+                sampleType: quantityType,
+                predicate: predicate,
+                limit: 1,
+                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
+            ) { _, samples, _ in
+                guard let sample = (samples as? [HKQuantitySample])?.first else {
+                    continuation.resume(returning: 0)
+                    return
+                }
+
+                var value = sample.quantity.doubleValue(for: metric.hkUnit)
+                if metric == .distance {
+                    value /= 1000
+                }
+
+                continuation.resume(returning: value)
             }
 
             healthStore.execute(query)
@@ -282,7 +383,7 @@ enum AnalyticsComputation {
                     return
                 }
 
-                var sleepByDate: [DateComponents: TimeInterval] = [:]
+                var sleepByDate: [DateComponents: [DateInterval]] = [:]
                 let calendar = Calendar.current
 
                 for sample in samples {
@@ -290,18 +391,18 @@ enum AnalyticsComputation {
                     let isAsleep = [1, 3, 4, 5].contains(sample.value)
                     guard isAsleep else { continue }
 
-                    let duration = sample.endDate.timeIntervalSince(sample.startDate)
-                    let dateComponents = calendar.dateComponents([.year, .month, .day], from: sample.startDate)
-
-                    sleepByDate[dateComponents, default: 0] += duration
+                    let bucketDate = self.sleepBucketDate(for: sample.endDate, component: bucketComponent, calendar: calendar)
+                    let dateComponents = calendar.dateComponents(self.bucketComponents(for: bucketComponent), from: bucketDate)
+                    let interval = DateInterval(start: sample.startDate, end: sample.endDate)
+                    sleepByDate[dateComponents, default: []].append(interval)
                 }
 
                 var dataPoints: [AggregatedDataPoint] = []
-                for (dateComponents, duration) in sleepByDate.sorted(by: {
+                for (dateComponents, intervals) in sleepByDate.sorted(by: {
                     (calendar.date(from: $0.key) ?? .distantPast) < (calendar.date(from: $1.key) ?? .distantPast)
                 }) {
                     if let date = calendar.date(from: dateComponents) {
-                        let hours = duration / 3600
+                        let hours = AnalyticsComputation.mergedDuration(for: intervals) / 3600
                         dataPoints.append(AggregatedDataPoint(date: date, value: hours))
                     }
                 }
@@ -338,11 +439,13 @@ enum AnalyticsComputation {
                     return
                 }
 
+                let deduplicatedWorkouts = self.deduplicate(workouts: workouts)
                 var countByDate: [DateComponents: Int] = [:]
                 let calendar = Calendar.current
 
-                for workout in workouts {
-                    let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.startDate)
+                for workout in deduplicatedWorkouts {
+                    let bucketDate = self.bucketStartDate(for: workout.startDate, component: bucketComponent, calendar: calendar)
+                    let dateComponents = calendar.dateComponents(self.bucketComponents(for: bucketComponent), from: bucketDate)
                     countByDate[dateComponents, default: 0] += 1
                 }
 
@@ -359,6 +462,97 @@ enum AnalyticsComputation {
             }
 
             healthStore.execute(query)
+        }
+    }
+
+    private func bucketStartDate(
+        for date: Date,
+        component: Calendar.Component,
+        calendar: Calendar
+    ) -> Date {
+        switch component {
+        case .hour:
+            return calendar.dateInterval(of: .hour, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        case .month:
+            return calendar.dateInterval(of: .month, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        case .day:
+            fallthrough
+        default:
+            return calendar.startOfDay(for: date)
+        }
+    }
+
+    private func bucketComponents(for component: Calendar.Component) -> Set<Calendar.Component> {
+        switch component {
+        case .hour:
+            return [.year, .month, .day, .hour]
+        case .month:
+            return [.year, .month]
+        case .day:
+            fallthrough
+        default:
+            return [.year, .month, .day]
+        }
+    }
+
+    private func deduplicate(workouts: [HKWorkout]) -> [HKWorkout] {
+        let sorted = workouts.sorted { lhs, rhs in
+            if lhs.startDate == rhs.startDate {
+                return lhs.endDate < rhs.endDate
+            }
+            return lhs.startDate < rhs.startDate
+        }
+
+        var result: [HKWorkout] = []
+        result.reserveCapacity(sorted.count)
+
+        for workout in sorted {
+            if let last = result.last, workoutsRepresentSameSession(last, workout) {
+                continue
+            }
+
+            result.append(workout)
+        }
+
+        return result
+    }
+
+    private func workoutsRepresentSameSession(_ lhs: HKWorkout, _ rhs: HKWorkout) -> Bool {
+        guard lhs.workoutActivityType == rhs.workoutActivityType else {
+            return false
+        }
+
+        let startDelta = abs(lhs.startDate.timeIntervalSince(rhs.startDate))
+        let endDelta = abs(lhs.endDate.timeIntervalSince(rhs.endDate))
+        let overlapStart = max(lhs.startDate, rhs.startDate)
+        let overlapEnd = min(lhs.endDate, rhs.endDate)
+        let overlap = max(0, overlapEnd.timeIntervalSince(overlapStart))
+        let shortestDuration = min(lhs.duration, rhs.duration)
+
+        let heavilyOverlapping = shortestDuration > 0 && overlap / shortestDuration > 0.8
+        let nearIdenticalWindow = startDelta < 600 && endDelta < 600
+
+        return heavilyOverlapping || nearIdenticalWindow
+    }
+
+    private func sleepBucketDate(
+        for date: Date,
+        component: Calendar.Component,
+        calendar: Calendar
+    ) -> Date {
+        switch component {
+        case .month:
+            return calendar.dateInterval(of: .month, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        case .hour:
+            return calendar.dateInterval(of: .hour, for: date)?.start
+                ?? calendar.startOfDay(for: date)
+        case .day:
+            fallthrough
+        default:
+            return calendar.startOfDay(for: date)
         }
     }
 

@@ -45,6 +45,7 @@ struct AnalyticsView: View {
             }
             .navigationTitle("Dashboard")
             .navigationBarTitleDisplayMode(.large)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(FormaColors.surface, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .task(id: selectedPeriod) {

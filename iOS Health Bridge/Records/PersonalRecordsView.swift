@@ -52,13 +52,17 @@ struct PersonalRecordsView: View {
                             // Goals Section
                             goalsSection
                         }
-                        .padding()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
                 }
             }
             .navigationTitle("Records")
             .navigationBarTitleDisplayMode(.large)
             .navigationBarBackButtonHidden(false)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(FormaColors.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .task {
                 await loadRecords()
             }
@@ -161,7 +165,10 @@ struct PersonalRecordsView: View {
 
         recordsManager.loadFromDisk()
 
-        async let newSummariesTask = dataService.fetchAllSummaries(period: .allTime)
+        async let newSummariesTask = dataService.fetchAllSummaries(
+            period: .allTime,
+            bucketComponentOverride: .day
+        )
         async let goalValuesTask = loadGoalValues()
 
         let newSummaries = await newSummariesTask

@@ -77,10 +77,24 @@ import OSLog
 
         for summary in summaries {
             let metricType = summary.metricType
-            let newValue = summary.displayValue
+            guard let candidate = recordCandidate(from: summary) else {
+                continue
+            }
+
+            let newValue = candidate.value
 
             let isBetter: Bool
             if let existingRecord = records[metricType] {
+                if shouldReplaceLegacyRecord(existingRecord, with: candidate, summary: summary) {
+                    let correctedRecord = PersonalRecord(
+                        metricType: metricType,
+                        value: candidate.value,
+                        date: candidate.date
+                    )
+                    records[metricType] = correctedRecord
+                    continue
+                }
+
                 // Compare with existing record
                 if metricType.higherIsBetter {
                     isBetter = newValue > existingRecord.value
@@ -96,7 +110,7 @@ import OSLog
                 let newRecord = PersonalRecord(
                     metricType: metricType,
                     value: newValue,
-                    date: Date()
+                    date: candidate.date
                 )
                 records[metricType] = newRecord
                 recentlyBrokenRecords.append(newRecord)
@@ -124,11 +138,17 @@ import OSLog
     }
 
     func progress(for goal: HealthGoal, currentValue: Double) -> Double {
-        if goal.target == 0 {
+        if goal.target == 0 || currentValue <= 0 {
             return 0.0
         }
 
-        let rawProgress = currentValue / goal.target
+        let rawProgress: Double
+        if goal.metricType.higherIsBetter {
+            rawProgress = currentValue / goal.target
+        } else {
+            rawProgress = goal.target / currentValue
+        }
+
         return min(max(rawProgress, 0.0), 1.0)
     }
 
@@ -136,5 +156,27 @@ import OSLog
         Array(goals.values)
             .filter { $0.isActive }
             .sorted { $0.metricType.id < $1.metricType.id }
+    }
+
+    private func recordCandidate(from summary: MetricSummary) -> AggregatedDataPoint? {
+        summary.recordPoint
+    }
+
+    private func shouldReplaceLegacyRecord(
+        _ existingRecord: PersonalRecord,
+        with candidate: AggregatedDataPoint,
+        summary: MetricSummary
+    ) -> Bool {
+        let tolerance = 0.001
+
+        if summary.metricType.recordStrategy == .latestValue {
+            return candidate.date > existingRecord.date || abs(existingRecord.value - candidate.value) > tolerance
+        }
+
+        if summary.metricType.higherIsBetter {
+            return existingRecord.value - candidate.value > tolerance
+        }
+
+        return candidate.value - existingRecord.value > tolerance
     }
 }

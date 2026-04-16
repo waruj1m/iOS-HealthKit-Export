@@ -38,10 +38,19 @@ struct MainTabView: View {
             switch self {
             case .dashboard: return "chart.bar.fill"
             case .insights:  return "sparkles"
-            case .coach:     return "bubble.left.and.sparkles.fill"
+            case .coach:     return "CoachIcon"
             case .records:   return "trophy.fill"
             case .export:    return "square.and.arrow.up.fill"
             case .settings:  return "gearshape.fill"
+            }
+        }
+
+        var usesCustomAssetIcon: Bool {
+            switch self {
+            case .coach:
+                return true
+            case .dashboard, .insights, .records, .export, .settings:
+                return false
             }
         }
 
@@ -58,7 +67,16 @@ struct MainTabView: View {
             ForEach(Tab.allCases, id: \.self) { tab in
                 tabContent(for: tab)
                     .tabItem {
-                        Label(tab.label, systemImage: tab.sfSymbol)
+                        if tab.usesCustomAssetIcon {
+                            Label {
+                                Text(tab.label)
+                            } icon: {
+                                Image(tab.sfSymbol)
+                                    .renderingMode(.template)
+                            }
+                        } else {
+                            Label(tab.label, systemImage: tab.sfSymbol)
+                        }
                     }
                     .tag(tab)
             }
@@ -66,7 +84,13 @@ struct MainTabView: View {
         .tint(FormaColors.teal)
         .simultaneousGesture(tabSwipeGesture)
         // Apply dark tab bar styling
-        .onAppear { styleTabBar() }
+        .onAppear {
+            styleTabBar()
+            reconcileSelectedTabForCurrentTier()
+        }
+        .onChange(of: subscriptionManager.tier) { _, _ in
+            reconcileSelectedTabForCurrentTier()
+        }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
                 .environment(subscriptionManager)
@@ -135,6 +159,11 @@ struct MainTabView: View {
         withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
             selectedTab = tabs[newIndex]
         }
+    }
+
+    private func reconcileSelectedTabForCurrentTier() {
+        guard subscriptionManager.tier == .free, selectedTab.isPremium else { return }
+        selectedTab = .export
     }
 }
 

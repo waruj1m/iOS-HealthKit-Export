@@ -30,19 +30,12 @@ struct InsightsView: View {
             ZStack {
                 FormaColors.background.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    PeriodPicker(selected: $selectedPeriod)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(FormaColors.surface)
-
-                    if isLoading {
-                        loadingState
-                    } else if insights.isEmpty {
-                        emptyState
-                    } else {
-                        insightsList
-                    }
+                if isLoading {
+                    loadingState
+                } else if insights.isEmpty {
+                    emptyState
+                } else {
+                    insightsList
                 }
             }
             .navigationTitle("Insights")
@@ -59,12 +52,17 @@ struct InsightsView: View {
     private var loadingState: some View {
         ScrollView {
             VStack(spacing: 12) {
+                PeriodPicker(selected: $selectedPeriod)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 8)
+
                 ForEach(0..<4, id: \.self) { _ in
                     ShimmerView().frame(height: 80)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 
@@ -88,6 +86,9 @@ struct InsightsView: View {
     private var insightsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                PeriodPicker(selected: $selectedPeriod)
+                    .frame(maxWidth: .infinity)
+
                 if let featuredSummary {
                     insightsChartSection(summary: featuredSummary)
                 }
@@ -125,7 +126,8 @@ struct InsightsView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 

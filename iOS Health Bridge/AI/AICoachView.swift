@@ -18,28 +18,11 @@ struct AICoachView: View {
                 FormaColors.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    headerCard
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-
-                    if let errorMessage = session.errorMessage {
-                        errorBanner(message: errorMessage)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 8)
-                    }
-
                     if session.messages.isEmpty {
                         starterState
                     } else {
                         messageList
                     }
-
-                    composer
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
-                        .background(FormaColors.surface)
                 }
             }
             .navigationTitle("Coach")
@@ -60,6 +43,13 @@ struct AICoachView: View {
             .onChange(of: measurementSettings.measurementSystem) { _, newValue in
                 Task { await session.refreshContext(measurementSystem: newValue) }
             }
+            .safeAreaInset(edge: .bottom) {
+                composer
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .background(FormaColors.surface)
+            }
         }
     }
 
@@ -77,8 +67,11 @@ struct AICoachView: View {
                         )
                         .frame(width: 52, height: 52)
 
-                    Image(systemName: "bubble.left.and.sparkles.fill")
-                        .font(.system(size: 22, weight: .semibold))
+                    Image("CoachIcon")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
                         .foregroundStyle(.white)
                 }
 
@@ -126,6 +119,8 @@ struct AICoachView: View {
     private var starterState: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                headerContent
+
                 FormaCard {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("What this coach can do")
@@ -182,7 +177,9 @@ struct AICoachView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
     }
 
@@ -190,6 +187,8 @@ struct AICoachView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    headerContent
+
                     ForEach(session.messages) { message in
                         messageBubble(message)
                             .id(message.id)
@@ -200,7 +199,9 @@ struct AICoachView: View {
                             .id("typing")
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
             .onChange(of: session.messages.count) { _, _ in
                 if let lastID = session.messages.last?.id {
@@ -298,6 +299,15 @@ struct AICoachView: View {
 
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !session.isLoading
+    }
+
+    @ViewBuilder
+    private var headerContent: some View {
+        headerCard
+
+        if let errorMessage = session.errorMessage {
+            errorBanner(message: errorMessage)
+        }
     }
 
     private func starterBullet(_ text: String) -> some View {
